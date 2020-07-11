@@ -275,6 +275,7 @@ test-suite func-test
                       , Deferred
                       , Definition
                       , Diagnostic
+                      , Eval
                       , Format
                       , FunctionalBadProject
                       , FunctionalCodeAction
