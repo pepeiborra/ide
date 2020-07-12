@@ -4,9 +4,11 @@ packages:
 
 tests: true
 documentation: true
+allow-newer: all
 
 package haskell-language-server
   test-show-details: direct
+  flags: -agpl
 package ghcide
   test-show-details: direct
 
