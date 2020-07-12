@@ -18,7 +18,7 @@ extra-source-files:
 
 flag agpl
   Description: Enable AGPL dependencies
-  Default:     True
+  Default:     False
   Manual:      False
 
 flag pedantic
