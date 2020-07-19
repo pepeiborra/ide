@@ -52,13 +52,19 @@ tests =
       testCase "Evaluation of expressions w/ lets" $ goldenTest "T4.hs",
       testCase "Refresh an evaluation" $ goldenTest "T5.hs",
       testCase "Refresh an evaluation w/ lets" $ goldenTest "T6.hs",
-      testCase "Refresh a multiline evaluation" $ goldenTest "T7.hs"
-      testCase "Handling of module dependencies" $ goldenTest "T8.hs"
+      testCase "Refresh a multiline evaluation" $ goldenTest "T7.hs",
+      testCase "Handling of module dependencies" $ goldenTest "T8.hs",
+      testCase "Handling of module dependencies in files of interest" $
+        goldenTestWithSession "T8.hs" ["T1.hs"]
     ]
 
 goldenTest :: FilePath -> IO ()
-goldenTest input = runSession hieCommand fullCaps evalPath $ do
-  doc <- openDoc input "haskell"
+goldenTest input = goldenTestWithSession input []
+
+goldenTestWithSession :: FilePath -> [FilePath] -> IO ()
+goldenTestWithSession input otherFilesOfInterest = runSession hieCommand fullCaps evalPath $ do
+  let inputs = input : otherFilesOfInterest
+  doc :_ <- traverse (\x -> openDoc x "haskell") inputs
   [CodeLens {_command = Just c}] <- getCodeLenses doc
   executeCommand c
   _resp :: ApplyWorkspaceEditRequest <- skipManyTill anyMessage message
