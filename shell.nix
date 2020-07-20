@@ -1,7 +1,10 @@
-opts@{...}:
+{
+  projectFileName ? "cabal.project"
+, compiler-nix-name ? "ghc8101"
+}:
 
 let
-  hsPkgs = import ./. opts;
+  hsPkgs = import ./. {inherit projectFileName compiler-nix-name};
 in
   hsPkgs.shellFor {
     # Include only the *local* packages of your project.
