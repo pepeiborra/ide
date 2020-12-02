@@ -1,16 +1,30 @@
 { sources ? import ./sources.nix }:
 let
+  ourProjects = pkgs: [ pkgs.ghcide
+                        pkgs.hie-compat
+                        pkgs.haskell-language-server
+                        pkgs.hls-plugin-api
+                        pkgs.hls-tactics-plugin
+                        pkgs.hls-hlint-plugin
+                      ];
+  allDepends = p: builtins.map (x: x.pname) (p.getBuildInputs.haskellBuildInputs or []);
+  ourDirectDependsFun = pkgs: haskellPkgs: pkgs.lib.lists.unique (builtins.concatMap allDepends (ourProjects haskellPkgs));
+
   overlay = _self: pkgs:
     let sharedOverrides = {
-        overrides = _self: super: {
-            mkDerivation = args: super.mkDerivation (args //
+        overrides = self: super:
+          let ourDirectDepends = ourDirectDependsFun pkgs self;
+          in {
+            mkDerivation = args: super.mkDerivation (args // # pkgs.lib.trace ourDirectDepends
                 {
                     # skip running tests for Hackage packages
                     doCheck = args.pname != "ghcide" && args.pname != "haskell-language-server";
                     # relax upper bounds
                     jailbreak = args.pname != "jailbreak-cabal";
+                    # Use -haddock for direct dependencies
+                    buildFlags = pkgs.lib.optional (pkgs.lib.elem args.pname ourDirectDepends) "--ghc-option=-haddock";
                 });
-            };
+              };
             };
         extended = haskellPackages:
           haskellPackages.extend (pkgs.haskell.lib.packageSourceOverrides {
@@ -30,8 +44,7 @@ let
                 ghc8101 = extended (pkgs.haskell.packages.ghc8101.override sharedOverrides);
                 ghc8102 = extended (pkgs.haskell.packages.ghc8102.override sharedOverrides);
             };
-        };
+          };
         };
 
-in import sources.nixpkgs
-{ overlays = [ overlay ] ; config = {allowBroken = true;}; }
+  in import sources.nixpkgs { overlays = [ overlay ] ; config = {allowBroken = true;};}
