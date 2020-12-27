@@ -45,7 +45,6 @@ import           DynFlags (xopt)
 import qualified FastString
 import           GHC.Generics (Generic)
 import           GHC.LanguageExtensions.Type (Extension (LambdaCase))
-import           Ide.Plugin (mkLspCommand)
 import           Ide.Plugin.Tactic.Auto
 import           Ide.Plugin.Tactic.Context
 import           Ide.Plugin.Tactic.GHC
@@ -64,7 +63,7 @@ import           System.Timeout
 import           TcRnTypes (tcg_binds)
 
 
-descriptor :: PluginId -> PluginDescriptor
+descriptor :: PluginId -> PluginDescriptor IdeState
 descriptor plId = (defaultPluginDescriptor plId)
     { pluginCommands
         = fmap (\tc ->
@@ -151,7 +150,7 @@ runIde :: IdeState -> Action a -> IO a
 runIde state = runAction "tactic" state
 
 
-codeActionProvider :: CodeActionProvider
+codeActionProvider :: CodeActionProvider IdeState
 codeActionProvider _conf state plId (TextDocumentIdentifier uri) range _ctx
   | Just nfp <- uriToNormalizedFilePath $ toNormalizedUri uri =
       fromMaybeT (Right $ List []) $ do
@@ -290,7 +289,7 @@ spliceProvenance provs =
     overProvenance (maybe id const $ M.lookup name provs) hi
 
 
-tacticCmd :: (OccName -> TacticsM ()) -> CommandFunction TacticParams
+tacticCmd :: (OccName -> TacticsM ()) -> CommandFunction IdeState TacticParams
 tacticCmd tac lf state (TacticParams uri range var_name)
   | Just nfp <- uriToNormalizedFilePath $ toNormalizedUri uri =
       fromMaybeT (Right Null, Nothing) $ do
