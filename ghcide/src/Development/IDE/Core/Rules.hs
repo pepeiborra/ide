@@ -82,7 +82,6 @@ import Development.Shake.Classes hiding (get, put)
 import Control.Monad.Trans.Except (runExceptT)
 import Data.ByteString (ByteString)
 import Control.Concurrent.Async (concurrently)
-import System.Time.Extra
 import Control.Monad.Reader
 import System.Directory ( getModificationTime )
 import Control.Exception
@@ -188,12 +187,10 @@ getHieFile ide file mod = do
 getHomeHieFile :: NormalizedFilePath -> MaybeT IdeAction HieFile
 getHomeHieFile f = do
   ms <- fst . fst <$> useE GetModSummaryWithoutTimestamps f
-  let normal_hie_f = toNormalizedFilePath' hie_f
-      hie_f = ml_hie_file $ ms_location ms
+  let hie_f = ml_hie_file $ ms_location ms
 
   mbHieTimestamp <- either (\(_ :: IOException) -> Nothing) Just <$> (liftIO $ try $ getModificationTime hie_f)
   srcTimestamp   <- MaybeT (either (\(_ :: IOException) -> Nothing) Just <$> (liftIO $ try $ getModificationTime $ fromNormalizedFilePath f))
-  liftIO $ print (mbHieTimestamp, srcTimestamp, hie_f, normal_hie_f)
   let isUpToDate
         | Just d <- mbHieTimestamp = d > srcTimestamp
         | otherwise = False
@@ -203,15 +200,27 @@ getHomeHieFile f = do
       ncu <- mkUpdater
       hf <- liftIO $ whenMaybe isUpToDate (loadHieFile ncu hie_f)
       MaybeT $ return hf
-    else do
-      wait <- lift $ delayedAction $ mkDelayedAction "OutOfDateHie" L.Info $ do
-        hsc <- hscEnv <$> use_ GhcSession f
-        pm <- use_ GetParsedModule f
-        (_, mtm)<- typeCheckRuleDefinition hsc pm
-        mapM_ (getHieAstRuleDefinition f hsc) mtm -- Write the HiFile to disk
-      _ <- MaybeT $ liftIO $ timeout 1 wait
-      ncu <- mkUpdater
-      liftIO $ loadHieFile ncu hie_f
+    else
+      regenerateHomeHieFile f hie_f ms
+
+regenerateHomeHieFile :: NormalizedFilePath -> FilePath -> ModSummary -> MaybeT IdeAction HieFile
+regenerateHomeHieFile f hie_f ms = do
+    isFOI <- fst <$> useE IsFileOfInterest f
+    -- Write the HiFile to disk by invoking the GetHieAst rule
+    wait <- lift $ delayedAction $ mkDelayedAction "OutOfDateHie" L.Info $ runMaybeT $ do
+        case isFOI of
+            -- Do not invoke the rule for non FOIs to avoid polluting the values cache
+            NotFOI -> do
+                hsc <- MaybeT $ fmap hscEnv . snd <$> ghcSessionDepsDefinition f
+                opts <- lift getIdeOptions
+                pm <- MaybeT $ snd . snd <$> liftIO(getParsedModuleDefinition hsc opts f ms)
+                (_, mtm)<- lift $ typeCheckRuleDefinition hsc pm
+                lift $ mapM_ (getHieAstRuleDefinition f hsc) mtm
+            IsFOI _ ->
+                void $ MaybeT $ use GetHieAst f
+    MaybeT $ liftIO wait
+    ncu <- mkUpdater
+    liftIO $ loadHieFile ncu hie_f
 
 getSourceFileSource :: NormalizedFilePath -> Action BS.ByteString
 getSourceFileSource nfp = do

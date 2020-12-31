@@ -17,7 +17,7 @@ import           Control.DeepSeq
 import Data.Aeson.Types (Value)
 import Data.Binary
 import           Development.IDE.Import.DependencyInformation
-import Development.IDE.GHC.Compat hiding (HieFileResult)
+import Development.IDE.GHC.Compat
 import Development.IDE.GHC.Util
 import Development.IDE.Types.KnownTargets
 import           Data.Hashable

@@ -3538,11 +3538,11 @@ simpleMultiTest2 = testCase "simple-multi-test2" $ runWithExtraFiles "multi" $ \
     bdoc <- createDoc bPath "haskell" bSource
     expectNoMoreDiagnostics 10
     aSource <- liftIO $ readFileUtf8 aPath
-    (TextDocumentIdentifier adoc) <- createDoc aPath "haskell" aSource
-    -- Need to have some delay here or the test fails
-    expectNoMoreDiagnostics 10
+    adoc <- createDoc aPath "haskell" aSource
+    Right WaitForIdeRuleResult {..} <- waitForAction "TypeCheck" adoc
+    liftIO $ assertBool "A should typecheck" ideResultSuccess
     locs <- getDefinitions bdoc (Position 2 7)
-    let fooL = mkL adoc 2 0 2 3
+    let fooL = mkL (adoc ^. L.uri) 2 0 2 3
     checkDefs locs (pure [fooL])
     expectNoMoreDiagnostics 0.5
 
