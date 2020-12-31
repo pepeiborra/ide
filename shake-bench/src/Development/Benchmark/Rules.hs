@@ -120,13 +120,7 @@ allTargets buildFolder = do
     examples    <- askOracle $ GetExamples ()
     versions    <- askOracle $ GetVersions ()
     need $
-      [buildFolder </> getExampleName e </> "results.csv" | e <- examples ] ++
-      [buildFolder </> "results.csv"]
-        ++ [ buildFolder </> getExampleName ex </> escaped (escapeExperiment e) <.> "svg"
-             | e <- experiments
-             , ex <- examples
-           ]
-        ++ [ buildFolder </>
+      [ buildFolder </>
              getExampleName ex </>
              T.unpack (humanName ver) </>
              escaped (escapeExperiment e) <.> mode <.> "svg"
@@ -134,6 +128,12 @@ allTargets buildFolder = do
                ex <- examples,
                ver <- versions,
                mode <- ["", "diff"]
+           ]
+      ++ [buildFolder </> getExampleName e </> "results.csv" | e <- examples ]
+      ++ [buildFolder </> "results.csv"]
+      ++ [ buildFolder </> getExampleName ex </> escaped (escapeExperiment e) <.> "svg"
+             | e <- experiments
+             , ex <- examples
            ]
 
 --------------------------------------------------------------------------------
