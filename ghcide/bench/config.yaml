@@ -59,4 +59,9 @@ versions:
 # - v0.5.0
 # - v0.6.0
 - upstream: origin/master
-- HEAD
+- A64: 51e2b6a1
+- Adefault: 084d322a83a492c68da966ef0482874e84d0eab4
+- nmA128: "70607168"
+- nmAdefault: "bc0b89ac"
+- parallelGC: bbbfec52
+- idleGC: "66588556"
