@@ -254,7 +254,7 @@ executable ghcide
                 -- disable idle GC
                 -- disable parallel GC
                 -- increase nursery size
-                "-with-rtsopts=-I0 -qg -A32M --nonmoving-gc"
+                "-with-rtsopts=-I0 -qg -A64M --nonmoving-gc"
     main-is: Main.hs
     build-depends:
         aeson,
