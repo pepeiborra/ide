@@ -61,7 +61,11 @@ import Safe (atMay)
 import Bag (isEmptyBag)
 import qualified Data.HashSet as Set
 import Control.Concurrent.Extra (threadDelay, readVar)
+import Development.IDE.GHC.Util (printRdrName)
 
+-- import Language.Haskell.GHC.ExactPrint
+-- import Language.Haskell.GHC.ExactPrint.Parsers (parseDecl)
+-- import Language.Haskell.GHC.ExactPrint.Types hiding (GhcPs, Parens)
 plugin :: Plugin c
 plugin = codeActionPluginWithRules rules codeAction <> Plugin mempty setHandlersCodeLens
 
@@ -171,11 +175,33 @@ suggestAction packageExports ideOptions parsedModule text diag = concat
     ++ suggestNewImport packageExports pm diag
     ++ suggestDeleteUnusedBinding pm text diag
     ++ suggestExportUnusedTopBinding text pm diag
+    ++ suggestImplicitParameter pm diag
     | Just pm <- [parsedModule]
     ] ++
-    suggestFillHole diag                   -- Lowest priority
+    suggestFillHole diag -- Lowest priority
+suggestImplicitParameter :: ParsedModule -> Diagnostic -> [(T.Text, [TextEdit])]
+suggestImplicitParameter ParsedModule {pm_parsed_source = L _ HsModule {hsmodDecls}} Diagnostic {_message, _range}
+  | Just [implicit] <- matchRegexUnifySpaces _message "Unbound implicit parameter (\\([^)]+\\))",
+    Just (L _ (ValD _ FunBind {fun_id})) <- findDeclContainingLoc (_start _range) hsmodDecls,
+    Just (L _ (SigD _ (TypeSig _ _ HsWC {hswc_body = HsIB {hsib_body = L l _}}))) <- findSigOfDecl (unLoc fun_id) hsmodDecls,
+    Just (Range s _) <- srcSpanToRange l =
+    [ ( "Add " <> implicit <> " to the context of " <> T.pack (printRdrName (unLoc fun_id)),
+        -- TODO use ghc-exactprint
+        [TextEdit (Range s s) (implicit <> " => ")]
+      )
+    ]
+  | otherwise = []
 
+findSigOfDecl :: Eq (IdP p) => IdP p -> [GenLocated l (HsDecl p)] -> Maybe (GenLocated l (HsDecl p))
+findSigOfDecl idDecl decls =
+  listToMaybe
+    [ sig
+      | sig@(L _ (SigD _ (TypeSig _ idsSig _))) <- decls,
+        any (\(L _ idSig) -> idSig == idDecl) idsSig
+    ]
 
+findDeclContainingLoc :: Position -> [Located a] -> Maybe (Located a)
+findDeclContainingLoc loc = find (\(L l _) -> loc `isInsideSrcSpan` l)
 suggestRemoveRedundantImport :: ParsedModule -> Maybe T.Text -> Diagnostic -> [(T.Text, [TextEdit])]
 suggestRemoveRedundantImport ParsedModule{pm_parsed_source = L _  HsModule{hsmodImports}} contents Diagnostic{_range=_range,..}
 --     The qualified import of ‘many’ from module ‘Control.Applicative’ is redundant
