@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: Apache-2.0
 
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE CPP                   #-}
 #include "ghc-api-version.h"
 
@@ -41,6 +42,7 @@ import Development.IDE.Types.Options
 import Development.Shake (Rules)
 import qualified Data.HashMap.Strict as Map
 import qualified Language.Haskell.LSP.Core as LSP
+import Language.Haskell.GHC.ExactPrint.Parsers
 import Language.Haskell.LSP.VFS
 import Language.Haskell.LSP.Messages
 import Language.Haskell.LSP.Types
@@ -61,12 +63,9 @@ import Control.Applicative ((<|>))
 import Safe (atMay)
 import Bag (isEmptyBag)
 import qualified Data.HashSet as Set
-import Control.Concurrent.Extra (threadDelay, readVar)
+import Control.Concurrent.Extra (readVar, threadDelay)
 import Development.IDE.GHC.Util (printRdrName)
-
--- import Language.Haskell.GHC.ExactPrint
--- import Language.Haskell.GHC.ExactPrint.Parsers (parseDecl)
--- import Language.Haskell.GHC.ExactPrint.Types hiding (GhcPs, Parens)
+import GhcPlugins (mkFastString)
 plugin :: Plugin c
 plugin = codeActionPluginWithRules rules codeAction <> Plugin mempty setHandlersCodeLens
 
@@ -84,31 +83,49 @@ typeSignatureCommandId = "typesignature.add"
 
 -- | Generate code actions.
 codeAction
-    :: LSP.LspFuncs c
+    :: ()
+    => LSP.LspFuncs c
     -> IdeState
     -> TextDocumentIdentifier
     -> Range
     -> CodeActionContext
     -> IO (Either ResponseError [CAResult])
-codeAction lsp state (TextDocumentIdentifier uri) _range CodeActionContext{_diagnostics=List xs} = do
+codeAction lsp state (TextDocumentIdentifier uri) _range CodeActionContext {_diagnostics = List xs} = do
     contents <- LSP.getVirtualFileFunc lsp $ toNormalizedUri uri
     let text = Rope.toText . (_text :: VirtualFile -> Rope.Rope) <$> contents
         mbFile = toNormalizedFilePath' <$> uriToFilePath uri
     diag <- fmap (\(_, _, d) -> d) . filter (\(p, _, _) -> mbFile == Just p) <$> getDiagnostics state
-    (ideOptions, join -> parsedModule, join -> env) <- runAction "CodeAction" state $
-      (,,) <$> getIdeOptions
+    (ideOptions, join -> parsedModule, join -> env, join -> annotatedPS) <- runAction "CodeAction" state $
+      (,,,) <$> getIdeOptions
             <*> getParsedModule `traverse` mbFile
             <*> use GhcSession `traverse` mbFile
+            <*> use GetAnnotatedParsedSource `traverse` mbFile
     -- This is quite expensive 0.6-0.7s on GHC
     pkgExports <- runAction "CodeAction:PackageExports" state $ (useNoFile_ . PackageExports) `traverse` env
     localExports <- readVar (exportsMap $ shakeExtras state)
-    let exportsMap = localExports <> fromMaybe mempty pkgExports
-    pure . Right $
-        [ CACodeAction $ CodeAction title (Just CodeActionQuickFix) (Just $ List [x]) (Just edit) Nothing
+    let
+      exportsMap = localExports <> fromMaybe mempty pkgExports
+      df = ms_hspp_opts . pm_mod_summary <$> parsedModule
+      actions =
+        [ mkCA title  [x] edit
         | x <- xs, (title, tedit) <- suggestAction exportsMap ideOptions parsedModule text x
         , let edit = WorkspaceEdit (Just $ Map.singleton uri $ List tedit) Nothing
         ] <> caRemoveRedundantImports parsedModule text diag xs uri
 
+      actions' =
+          [mkCA title [x] edit
+          | x <- xs
+          , Just ps <- [annotatedPS]
+          , Just dynflags <- [df]
+          , let parse = parseAST dynflags ""
+          , (title, graft) <- suggestImplicitParameter parse ps x
+          , Right edit <- [transform dynflags (LSP.clientCapabilities lsp) uri graft ps]
+          ]
+    pure $ Right $ actions' <> actions
+
+mkCA :: () => T.Text -> [Diagnostic] -> WorkspaceEdit -> CAResult
+mkCA title diags edit =
+  CACodeAction $ CodeAction title (Just CodeActionQuickFix) (Just $ List diags) (Just edit) Nothing
 -- | Generate code lenses.
 codeLens
     :: LSP.LspFuncs c
@@ -178,22 +195,43 @@ suggestAction packageExports ideOptions parsedModule text diag = concat
     ++ suggestNewImport packageExports pm diag
     ++ suggestDeleteUnusedBinding pm text diag
     ++ suggestExportUnusedTopBinding text pm diag
-    ++ suggestImplicitParameter pm diag
     | Just pm <- [parsedModule]
     ] ++
     suggestFillHole diag -- Lowest priority
-suggestImplicitParameter :: ParsedModule -> Diagnostic -> [(T.Text, [TextEdit])]
-suggestImplicitParameter ParsedModule {pm_parsed_source = L _ HsModule {hsmodDecls}} Diagnostic {_message, _range}
-  | Just [implicit] <- matchRegexUnifySpaces _message "Unbound implicit parameter (\\([^)]+\\))",
+
+
+suggestImplicitParameter ::
+  (String -> ParseResult (LHsType GhcPs)) ->
+  Annotated ParsedSource ->
+  Diagnostic ->
+  [(T.Text, Graft (Either String) ParsedSource)]
+
+suggestImplicitParameter parse ps Diagnostic {_message, _range}
+  | L _ HsModule {hsmodDecls} <- astA ps,
+    Just [nm,ty] <- matchRegexUnifySpaces _message "Unbound implicit parameter \\(([^:]+)::(.+)\\) arising",
     Just (L _ (ValD _ FunBind {fun_id})) <- findDeclContainingLoc (_start _range) hsmodDecls,
-    Just (L _ (SigD _ (TypeSig _ _ HsWC {hswc_body = HsIB {hsib_body = L l _}}))) <- findSigOfDecl (unLoc fun_id) hsmodDecls,
-    Just (Range s _) <- srcSpanToRange l =
-    [ ( "Add " <> implicit <> " to the context of " <> T.pack (printRdrName (unLoc fun_id)),
-        -- TODO use ghc-exactprint
-        [TextEdit (Range s s) (implicit <> " => ")]
-      )
-    ]
+    Just (L _ (SigD _ (TypeSig _ _ HsWC {hswc_body = HsIB {hsib_body}}))) <- findSigOfDecl (unLoc fun_id) hsmodDecls,
+    Right annotatedTy <- parse (T.unpack ty)
+    = [( "Add " <> nm <> "::" <> ty <> " to the context of " <> T.pack (printRdrName (unLoc fun_id))
+        , insertImplicitParameter hsib_body nm annotatedTy)]
   | otherwise = []
+--
+insertImplicitParameter :: LHsType GhcPs -> T.Text -> (a2, LHsType GhcPs) -> Graft (Either String) ParsedSource
+insertImplicitParameter ast@(L l _) nm (_anns, ty)
+  | ((L l (_ : _)), _) <- splitLHsQualTy ast =
+    graft l (implicit l)
+  | otherwise =
+    graft l (L l $ HsQualTy NoExtField (L l [implicit l]) ast)
+  where
+    implicit :: SrcSpan -> LHsType GhcPs
+    implicit l = nlHsParTy $
+      L
+        l
+        ( HsIParamTy
+            NoExtField
+            (L l (HsIPName (mkFastString $ tail $ T.unpack nm)))
+            ty
+        )
 
 findSigOfDecl :: Eq (IdP p) => IdP p -> [GenLocated l (HsDecl p)] -> Maybe (GenLocated l (HsDecl p))
 findSigOfDecl idDecl decls =
@@ -205,6 +243,7 @@ findSigOfDecl idDecl decls =
 
 findDeclContainingLoc :: Position -> [Located a] -> Maybe (Located a)
 findDeclContainingLoc loc = find (\(L l _) -> loc `isInsideSrcSpan` l)
+--
 suggestRemoveRedundantImport :: ParsedModule -> Maybe T.Text -> Diagnostic -> [(T.Text, [TextEdit])]
 suggestRemoveRedundantImport ParsedModule{pm_parsed_source = L _  HsModule{hsmodImports}} contents Diagnostic{_range=_range,..}
 --     The qualified import of ‘many’ from module ‘Control.Applicative’ is redundant

@@ -4064,7 +4064,7 @@ withLongTimeout :: IO a -> IO a
 withLongTimeout = bracket_ (setEnv "LSP_TIMEOUT" "120" True) (unsetEnv "LSP_TIMEOUT")
 
 -- | Takes a directory as well as relative paths to where we should launch the executable as well as the session root.
-runInDir' :: FilePath -> FilePath -> FilePath -> [String] -> Session a -> IO a
+runInDir' :: (?config::SessionConfig) => FilePath -> FilePath -> FilePath -> [String] -> Session a -> IO a
 runInDir' dir startExeIn startSessionIn extraOptions s = do
   ghcideExe <- locateGhcideExecutable
   let startDir = dir </> startExeIn
