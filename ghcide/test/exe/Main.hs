@@ -687,6 +687,7 @@ codeActionTests = testGroup "code actions"
   , removeRedundantConstraintsTests
   , addTypeAnnotationsToLiteralsTest
   , exportUnusedTests
+  , addImplicitParamsConstraintTests
   ]
 
 codeActionHelperFunctionTests :: TestTree
@@ -2026,55 +2027,90 @@ addFunctionConstraintTests = let
     , "    => Pair a b -> Pair a b -> Bool"
     , "eq (Pair x y) (Pair x' y') = x == x' && y == y'"
     ]
-
-  check :: String -> T.Text -> T.Text -> T.Text -> TestTree
-  check testName actionTitle originalCode expectedCode = testSession testName $ do
-    doc <- createDoc "Testing.hs" "haskell" originalCode
-    _ <- waitForDiagnostics
-    actionsOrCommands <- getCodeActions doc (Range (Position 6 0) (Position 6 maxBound))
-    chosenAction <- liftIO $ pickActionWithTitle actionTitle actionsOrCommands
-    executeCodeAction chosenAction
-    modifiedCode <- documentContents doc
-    liftIO $ expectedCode @=? modifiedCode
-
   in testGroup "add function constraint"
-  [ check
+  [ checkCodeAction
     "no preexisting constraint"
     "Add `Eq a` to the context of the type signature for `eq`"
     (missingConstraintSourceCode "")
     (missingConstraintSourceCode "Eq a => ")
-  , check
+  , checkCodeAction
     "no preexisting constraint, with forall"
     "Add `Eq a` to the context of the type signature for `eq`"
     (missingConstraintWithForAllSourceCode "")
     (missingConstraintWithForAllSourceCode "Eq a => ")
-  , check
+  , checkCodeAction
     "preexisting constraint, no parenthesis"
     "Add `Eq b` to the context of the type signature for `eq`"
     (incompleteConstraintSourceCode "Eq a")
     (incompleteConstraintSourceCode "(Eq a, Eq b)")
-  , check
+  , checkCodeAction
     "preexisting constraints in parenthesis"
     "Add `Eq c` to the context of the type signature for `eq`"
     (incompleteConstraintSourceCode2 "(Eq a, Eq b)")
     (incompleteConstraintSourceCode2 "(Eq a, Eq b, Eq c)")
-  , check
+  , checkCodeAction
     "preexisting constraints with forall"
     "Add `Eq b` to the context of the type signature for `eq`"
     (incompleteConstraintWithForAllSourceCode "Eq a")
     (incompleteConstraintWithForAllSourceCode "(Eq a, Eq b)")
-  , check
+  , checkCodeAction
     "preexisting constraint, with extra spaces in context"
     "Add `Eq b` to the context of the type signature for `eq`"
     (incompleteConstraintSourceCodeWithExtraCharsInContext "( Eq a )")
     (incompleteConstraintSourceCodeWithExtraCharsInContext "(Eq a, Eq b)")
-  , check
+  , checkCodeAction
     "preexisting constraint, with newlines in type signature"
     "Add `Eq b` to the context of the type signature for `eq`"
     (incompleteConstraintSourceCodeWithNewlinesInTypeSignature "(Eq a)")
     (incompleteConstraintSourceCodeWithNewlinesInTypeSignature "(Eq a, Eq b)")
   ]
 
+checkCodeAction :: String -> T.Text -> T.Text -> T.Text -> TestTree
+checkCodeAction testName actionTitle originalCode expectedCode = testSession testName $ do
+  doc <- createDoc "Testing.hs" "haskell" originalCode
+  _ <- waitForDiagnostics
+  actionsOrCommands <- getCodeActions doc (Range (Position 6 0) (Position 6 maxBound))
+  chosenAction <- liftIO $ pickActionWithTitle actionTitle actionsOrCommands
+  executeCodeAction chosenAction
+  modifiedCode <- documentContents doc
+  liftIO $ expectedCode @=? modifiedCode
+
+addImplicitParamsConstraintTests :: TestTree
+addImplicitParamsConstraintTests =
+  testGroup
+    "add missing implicit params constraints"
+    [ testGroup
+        "introduced"
+        [ let ex ctxtA = exampleCode "?a" ctxtA ""
+           in checkCodeAction "at top level" "Add ?a::() to the context of fBase" (ex "") (ex "?a :: ()"),
+          let ex ctxA = exampleCode "x where x = ?a" ctxA ""
+           in checkCodeAction "in nested def" "Add ?a::() to the context of fBase" (ex "") (ex "?a :: ()")
+        ],
+      testGroup
+        "inherited"
+        [ let ex = exampleCode "()" "?a::()"
+           in checkCodeAction
+                "with preexisting context"
+                "Add `?a::()` to the context of the type signature for `fCaller`"
+                (ex "Eq ()")
+                (ex "?a :: (), Eq ()"),
+          let ex = exampleCode "()" "?a::()"
+           in checkCodeAction "without preexisting context" "Add ?a::() to the context of fCaller" (ex "") (ex "?a :: ()")
+        ]
+    ]
+  where
+    mkContext "" = ""
+    mkContext contents = "(" <> contents <> ") => "
+
+    exampleCode bodyBase contextBase contextCaller =
+      T.unlines
+        [ "{-# LANGUAGE FlexibleContexts, ImplicitParams #-}",
+          "module Testing where",
+          "fBase :: " <> mkContext contextBase <> "()",
+          "fBase = " <> bodyBase,
+          "fCaller :: " <> mkContext contextCaller <> "()",
+          "fCaller = fBase"
+        ]
 removeRedundantConstraintsTests :: TestTree
 removeRedundantConstraintsTests = let
   header =
@@ -4064,7 +4100,7 @@ withLongTimeout :: IO a -> IO a
 withLongTimeout = bracket_ (setEnv "LSP_TIMEOUT" "120" True) (unsetEnv "LSP_TIMEOUT")
 
 -- | Takes a directory as well as relative paths to where we should launch the executable as well as the session root.
-runInDir' :: (?config::SessionConfig) => FilePath -> FilePath -> FilePath -> [String] -> Session a -> IO a
+runInDir' :: FilePath -> FilePath -> FilePath -> [String] -> Session a -> IO a
 runInDir' dir startExeIn startSessionIn extraOptions s = do
   ghcideExe <- locateGhcideExecutable
   let startDir = dir </> startExeIn
