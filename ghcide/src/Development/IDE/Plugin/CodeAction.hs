@@ -722,7 +722,7 @@ suggestConstraint parsedModule mContents diag@Diagnostic {..}
     where
       findMissingConstraint :: T.Text -> Maybe T.Text
       findMissingConstraint t =
-        let regex = "(No instance for|Could not deduce) \\((.+)\\) arising from a use of"
+        let regex = "(No instance for|Could not deduce:?) \\(?(.+)\\)? arising from a use of"
          in matchRegexUnifySpaces t regex <&> last
 
 normalizeConstraints :: T.Text -> T.Text -> T.Text
