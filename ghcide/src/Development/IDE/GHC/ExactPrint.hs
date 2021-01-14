@@ -22,7 +22,7 @@ module Development.IDE.GHC.ExactPrint
       ASTElement (..),
       ExceptStringT (..),
       Annotated(..),
-    )
+      graftA)
 where
 
 import BasicTypes (appPrec)
@@ -186,6 +186,22 @@ graft dst val = Graft $ \dflags a -> do
             )
             a
 
+graftA ::
+  forall ast a.
+  (Data a, ASTElement ast) =>
+  SrcSpan ->
+  (Anns, Located ast) ->
+  Graft (Either String) a
+graftA dst (anns, val) = Graft $ \_dflags a -> do
+  modifyAnnsT $ mappend anns
+  pure $
+    everywhere'
+      ( mkT $
+          \case
+            (L src _ :: Located ast) | src == dst -> val
+            l -> l
+      )
+      a
 ------------------------------------------------------------------------------
 
 graftWithM ::
