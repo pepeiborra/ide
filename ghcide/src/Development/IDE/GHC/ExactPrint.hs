@@ -53,7 +53,7 @@ import Language.Haskell.GHC.ExactPrint.Parsers
 import Language.Haskell.LSP.Types
 import Language.Haskell.LSP.Types.Capabilities (ClientCapabilities)
 import Outputable (Outputable, ppr, showSDoc)
-import Retrie.ExactPrint hiding (parseDecl, parseExpr, parsePattern, parseType)
+import Retrie.ExactPrint (Annotated (..), printA, transformA, unsafeMkA)
 #if __GLASGOW_HASKELL__ == 808
 import Control.Arrow
 #endif
@@ -175,7 +175,7 @@ graft ::
     Located ast ->
     Graft (Either String) a
 graft dst val = Graft $ \dflags a -> do
-    (anns, val') <- annotate dflags $ maybeParensAST val
+    (anns, val') <- annotate dflags val
     modifyAnnsT $ mappend anns
     pure $
         everywhere'

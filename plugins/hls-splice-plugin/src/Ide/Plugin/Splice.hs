@@ -165,7 +165,7 @@ expandTHSplice _eStyle lsp ideState params@ExpandSpliceParams {..} =
                             dflags
                             (clientCapabilities lsp)
                             uri
-                            (graft (RealSrcSpan spliceSpan) expanded)
+                            (graft (RealSrcSpan spliceSpan) (maybeParensAST expanded))
                             ps
             maybe (throwE "No splice information found") (either throwE pure) $
                 case spliceContext of

@@ -54,7 +54,7 @@ import           Ide.Plugin.Tactic.Tactics
 import           Ide.Plugin.Tactic.TestTypes
 import           Ide.Plugin.Tactic.Types
 import           Ide.PluginUtils
-import Development.IDE.GHC.ExactPrint (graft, transform, useAnnotatedSource)
+import           Development.IDE.GHC.ExactPrint (graft, maybeParensAST, transform, useAnnotatedSource)
 import           Ide.Types
 import           Language.Haskell.LSP.Core (clientCapabilities)
 import           Language.Haskell.LSP.Types
@@ -308,7 +308,7 @@ tacticCmd tac lf state (TacticParams uri range var_name)
                 $ ResponseError InvalidRequest (T.pack $ show err) Nothing
             Right rtr -> do
               traceMX "solns" $ rtr_other_solns rtr
-              let g = graft (RealSrcSpan span) $ rtr_extract rtr
+              let g = graft (RealSrcSpan span) $ maybeParensAST $ rtr_extract rtr
                   response = transform dflags (clientCapabilities lf) uri g pm
               pure $ case response of
                 Right res -> (Right Null , Just (WorkspaceApplyEdit, ApplyWorkspaceEditParams res))
