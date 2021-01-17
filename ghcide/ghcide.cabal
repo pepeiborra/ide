@@ -172,6 +172,7 @@ library
         Development.IDE.Plugin.CodeAction.ExactPrint
         Development.IDE.Plugin.HLS
         Development.IDE.Plugin.HLS.GhcIde
+        Development.IDE.Plugin.HLS.TypeLenses
         Development.IDE.Plugin.Test
 
     -- Unfortunately, we cannot use loadSession with ghc-lib since hie-bios uses
