@@ -31,8 +31,8 @@ import qualified Language.Haskell.LSP.VFS                as VFS
 import           Text.Regex.TDFA.Text()
 import Development.Shake (Rules)
 import Ide.PluginUtils (getClientConfig, pluginEnabled, getPluginConfig, responseError, getProcessID)
-import Development.IDE.Types.Logger (logInfo)
 import Development.IDE.Core.Tracing
+import Development.IDE.Types.Logger (logDebug)
 
 -- ---------------------------------------------------------------------
 
@@ -154,7 +154,7 @@ makeCodeLens :: [(PluginId, CodeLensProvider IdeState)]
       -> CodeLensParams
       -> IO (Either ResponseError (List CodeLens))
 makeCodeLens cas lf ideState params = do
-    logInfo (ideLogger ideState) "Plugin.makeCodeLens (ideLogger)" -- AZ
+    logDebug (ideLogger ideState) "Plugin.makeCodeLens (ideLogger)" -- AZ
     let
       makeLens (pid, provider) = do
           pluginConfig <- getPluginConfig lf pid
