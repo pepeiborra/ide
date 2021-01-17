@@ -13,7 +13,6 @@ module Development.IDE.Plugin.CodeAction
     , rulePackageExports
 
     -- * For testing
-    , blockCommandId
     , matchRegExMultipleImports
     ) where
 
@@ -56,10 +55,6 @@ import qualified Data.HashSet as Set
 import Control.Concurrent.Extra (readVar)
 import Development.IDE.GHC.Util (printRdrName)
 import Development.IDE.Plugin.HLS.TypeLenses (suggestSignature)
-
--- | a command that blocks forever. Used for testing
-blockCommandId :: T.Text
-blockCommandId = "ghcide.command.block"
 -- | Generate code actions.
 codeAction
     :: LSP.LspFuncs c
