@@ -4,9 +4,10 @@
 
 module Development.IDE.Plugin.Completions
     (
-      produceCompletions
-    , getCompletionsLSP
-    ) where
+      localCompletionsDescriptor,
+      nonLocalCompletionsDescriptor,
+      keywordCompletionsDescriptor
+    ,pragmaCompletionsDescriptor) where
 import Language.Haskell.LSP.Types
 import qualified Language.Haskell.LSP.Core as LSP
 import qualified Language.Haskell.LSP.VFS as VFS
@@ -27,25 +28,59 @@ import TcRnDriver (tcRnImportDecls)
 import Data.Maybe
 import Ide.Plugin.Config (Config (completionSnippetsOn, maxCompletions))
 import Ide.PluginUtils (getClientConfig)
+import Ide.Types (PluginDescriptor (pluginCompletionProvider, pluginRules), PluginId, defaultPluginDescriptor)
+import Development.IDE.Spans.LocalBindings
+import Control.Monad
+import Development.IDE.Types.Options
+import Language.Haskell.LSP.Types.Capabilities (ClientCapabilities)
 
 #if defined(GHC_LIB)
 import Development.IDE.Import.DependencyInformation
 #endif
-produceCompletions :: Rules ()
-produceCompletions = do
-    define $ \ProduceCompletions file -> do
-        local <- useWithStale LocalCompletions file
-        nonLocal <- useWithStale NonLocalCompletions file
-        let extract = fmap fst
-        return ([], extract local <> extract nonLocal)
-    define $ \LocalCompletions file -> do
+nonLocalCompletionsDescriptor :: PluginId -> PluginDescriptor IdeState
+nonLocalCompletionsDescriptor plId =
+  (defaultPluginDescriptor plId)
+    { pluginCompletionProvider = Just $ completionsProvider
+        (useWithStaleFast NonLocalCompletions)
+        (const $ return (mempty, zeroMapping)),
+      pluginRules = nonLocalCompletionsRule
+    }
+
+localCompletionsDescriptor :: PluginId -> PluginDescriptor IdeState
+localCompletionsDescriptor plId =
+  (defaultPluginDescriptor plId)
+    { pluginCompletionProvider = Just $ completionsProvider
+        (useWithStaleFast LocalCompletions)
+        (fmap (fromMaybe (mempty, zeroMapping)) . useWithStaleFast GetBindings),
+      pluginRules = localCompletionsRule
+    }
+
+keywordCompletionsDescriptor :: PluginId -> PluginDescriptor IdeState
+keywordCompletionsDescriptor plId =
+  (defaultPluginDescriptor plId)
+    { pluginCompletionProvider = Just $ pureCompletionsProvider (\ideOpts pFix _ _ -> getKeywordCompletions ideOpts pFix)
+    }
+
+-- | This completions provider covers all the pragmas except for LANGUAGE pragmas,
+--   which are already covered by:
+--  https://github.com/haskell/haskell-language-server/blob/master/plugins/default/src/Ide/Plugin/Pragmas.hs
+pragmaCompletionsDescriptor :: PluginId -> PluginDescriptor IdeState
+pragmaCompletionsDescriptor plId =
+  (defaultPluginDescriptor plId)
+    { pluginCompletionProvider = Just $ pureCompletionsProvider (\_ -> getOptionCompletions)
+    }
+
+--------------------------------------------------------------------------------
+localCompletionsRule :: Rules ()
+localCompletionsRule = define $ \LocalCompletions file -> do
         pm <- useWithStale GetParsedModule file
         case pm of
             Just (pm, _) -> do
                 let cdata = localCompletionsForParsedModule pm
                 return ([], Just cdata)
             _ -> return ([], Nothing)
-    define $ \NonLocalCompletions file -> do
+nonLocalCompletionsRule :: Rules ()
+nonLocalCompletionsRule = define $ \NonLocalCompletions file -> do
         -- For non local completions we avoid depending on the parsed module,
         -- synthetizing a fake module with an empty body from the buffer
         -- in the ModSummary, which preserves all the imports
@@ -85,15 +120,8 @@ dropListFromImportDecl iDecl = let
     in f <$> iDecl
 
 -- | Produce completions info for a file
-type instance RuleResult ProduceCompletions = CachedCompletions
 type instance RuleResult LocalCompletions = CachedCompletions
 type instance RuleResult NonLocalCompletions = CachedCompletions
-
-data ProduceCompletions = ProduceCompletions
-    deriving (Eq, Show, Typeable, Generic)
-instance Hashable ProduceCompletions
-instance NFData   ProduceCompletions
-instance Binary   ProduceCompletions
 
 data LocalCompletions = LocalCompletions
     deriving (Eq, Show, Typeable, Generic)
@@ -106,13 +134,15 @@ data NonLocalCompletions = NonLocalCompletions
 instance Hashable NonLocalCompletions
 instance NFData   NonLocalCompletions
 instance Binary   NonLocalCompletions
--- | Generate code actions.
-getCompletionsLSP
-    :: LSP.LspFuncs Config
+
+completionsProvider ::
+  (NormalizedFilePath -> IdeAction (Maybe (CachedCompletions, a))) ->
+  (NormalizedFilePath -> IdeAction (Bindings, PositionMapping)) ->
+  LSP.LspFuncs Config
     -> IdeState
     -> CompletionParams
     -> IO (Either ResponseError CompletionResponseResult)
-getCompletionsLSP lsp ide
+completionsProvider getCached getLocal lsp ide
   CompletionParams{_textDocument=TextDocumentIdentifier uri
                   ,_position=position
                   ,_context=completionContext} = do
@@ -122,9 +152,9 @@ getCompletionsLSP lsp ide
         let npath = toNormalizedFilePath' path
         (ideOpts, compls) <- runIdeAction "Completion" (shakeExtras ide) $ do
             opts <- liftIO $ getIdeOptionsIO $ shakeExtras ide
-            compls <- useWithStaleFast ProduceCompletions npath
+            compls <- getCached npath
             pm <- useWithStaleFast GetParsedModule npath
-            binds <- fromMaybe (mempty, zeroMapping) <$> useWithStaleFast GetBindings npath
+            binds <- getLocal npath
             pure (opts, fmap (,pm,binds) compls )
         case compls of
           Just ((cci', _), parsedMod, bindMap) -> do
@@ -141,4 +171,36 @@ getCompletionsLSP lsp ide
                 pure $ CompletionList (CompletionListType (null rest) (List topCompletions))
               _ -> return (Completions $ List [])
           _ -> return (Completions $ List [])
+      _ -> return (Completions $ List [])
+
+pureCompletionsProvider ::
+  ( IdeOptions ->
+    VFS.PosPrefixInfo ->
+    ClientCapabilities ->
+    WithSnippets ->
+    [CompletionItem]
+  ) ->
+  LSP.LspFuncs Config ->
+  IdeState ->
+  CompletionParams ->
+  IO (Either ResponseError CompletionResponseResult)
+pureCompletionsProvider
+  getCompletions
+  lsp
+  ide
+  CompletionParams
+    { _textDocument = TextDocumentIdentifier uri,
+      _position = position,
+      _context = completionContext
+    } = do
+    ideOptions <- liftIO $ getIdeOptionsIO $ shakeExtras ide
+    snippets <- WithSnippets . completionSnippetsOn <$> getClientConfig lsp
+    cnts <- LSP.getVirtualFileFunc lsp $ toNormalizedUri uri
+    pfix <- VFS.getCompletionPrefix position `traverse` cnts
+    let clientCaps = clientCapabilities $ shakeExtras ide
+    Right <$> case (join pfix, completionContext) of
+      (Just (VFS.PosPrefixInfo _ "" _ _), Just CompletionContext {_triggerCharacter = Just "."}) ->
+        return (Completions $ List [])
+      (Just pfix', _) ->
+        return $ Completions $ List $ getCompletions ideOptions pfix' clientCaps snippets
       _ -> return (Completions $ List [])

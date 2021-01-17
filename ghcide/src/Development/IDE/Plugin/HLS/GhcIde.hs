@@ -4,7 +4,11 @@
 -- | Exposes the ghcide features as an HLS plugin
 module Development.IDE.Plugin.HLS.GhcIde
   (
-    descriptor
+    descriptor,
+    localCompletionsDescriptor,
+    nonLocalCompletionsDescriptor,
+    keywordCompletionsDescriptor,
+    pragmaCompletionsDescriptor,
   ) where
 import Development.IDE
 import Development.IDE.Plugin.Completions as Completions
@@ -23,8 +27,7 @@ descriptor plId = (defaultPluginDescriptor plId)
   { pluginCodeActionProvider = Just codeAction'
   , pluginHoverProvider      = Just hover'
   , pluginSymbolsProvider    = Just symbolsProvider
-  , pluginCompletionProvider = Just getCompletionsLSP
-  , pluginRules              = produceCompletions <> rulePackageExports
+  , pluginRules              = rulePackageExports
   }
 
 -- ---------------------------------------------------------------------

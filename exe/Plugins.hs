@@ -92,6 +92,10 @@ idePlugins includeExamples = pluginDescToIdePlugins allPlugins
     basePlugins =
       [ GhcIde.descriptor  "ghcide"
       , TypeLenses.descriptor "type-lenses"
+      , keywordCompletionsDescriptor "keyword-completions"
+      , localCompletionsDescriptor "local-completions"
+      , nonLocalCompletionsDescriptor "non-local-completions"
+      , pragmaCompletionsDescriptor "pragma-completions"
 #if pragmas
       , Pragmas.descriptor  "pragmas"
 #endif
