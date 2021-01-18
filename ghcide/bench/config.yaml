@@ -26,16 +26,16 @@ examples:
 
 # The set of experiments to execute
 experiments:
-    - "edit"
-    - "hover"
-    - "hover after edit"
-    - "getDefinition"
-    - "getDefinition after edit"
+    # - "edit"
+    # - "hover"
+    # - "hover after edit"
+    # - "getDefinition"
+    # - "getDefinition after edit"
     - "completions"
     - "completions after edit"
-    - "code actions"
-    - "code actions after edit"
-    - "documentSymbols after edit"
+    # - "code actions"
+    # - "code actions after edit"
+    # - "documentSymbols after edit"
 
 # An ordered list of versions to analyze
 versions:
@@ -62,4 +62,7 @@ versions:
 # - v0.7.0
 # - v0.7.1
 - upstream: origin/master
-- HEAD
+- local : 010e52d7
+- nonLocal: add4ffbe
+- both : d8fd7c37
+- maxCompletions: e0ffa7e8
