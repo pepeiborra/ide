@@ -24,7 +24,6 @@ import Development.IDE.Core.Service
 import Development.IDE.Core.Shake
 import Development.IDE.GHC.Error
 import Development.IDE.GHC.ExactPrint
-import Development.IDE.LSP.Server
 import Development.IDE.Plugin.CodeAction.ExactPrint
 import Development.IDE.Plugin.CodeAction.PositionIndexed
 import Development.IDE.Plugin.CodeAction.RuleTypes

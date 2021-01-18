@@ -30,7 +30,7 @@ import           Language.Haskell.LSP.Types.Lens as L hiding (formatting, rangeF
 import qualified Language.Haskell.LSP.VFS                as VFS
 import           Text.Regex.TDFA.Text()
 import Development.Shake (Rules)
-import Ide.PluginUtils (getClientConfig, pluginEnabled, getPluginConfig, responseError, getProcessID)
+import Ide.PluginUtils (getPluginConfig, getProcessID, pluginEnabled, responseError)
 import Development.IDE.Core.Tracing
 import Development.IDE.Types.Logger (logDebug)
 
