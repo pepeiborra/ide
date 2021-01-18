@@ -93,7 +93,7 @@ main = do
             , TypeLenses.descriptor "type-lenses"
             , keywordCompletionsDescriptor "keyword-completions"
             , localCompletionsDescriptor "local-completions"
-            -- , nonLocalCompletionsDescriptor "non-local-completions"
+            , nonLocalCompletionsDescriptor "non-local-completions"
             , pragmaCompletionsDescriptor "pragma-completions"
             ] ++
             [ Test.blockCommandDescriptor "block-command" | argsTesting]
