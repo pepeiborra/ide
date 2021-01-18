@@ -92,8 +92,8 @@ main = do
             [ GhcIde.descriptor "ghcide"
             , TypeLenses.descriptor "type-lenses"
             , keywordCompletionsDescriptor "keyword-completions"
-            -- , localCompletionsDescriptor "local-completions"
-            , nonLocalCompletionsDescriptor "non-local-completions"
+            , localCompletionsDescriptor "local-completions"
+            -- , nonLocalCompletionsDescriptor "non-local-completions"
             , pragmaCompletionsDescriptor "pragma-completions"
             ] ++
             [ Test.blockCommandDescriptor "block-command" | argsTesting]
