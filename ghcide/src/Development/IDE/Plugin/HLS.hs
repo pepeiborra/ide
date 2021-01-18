@@ -436,7 +436,6 @@ makeCompletions :: [(PluginId, CompletionProvider IdeState)]
 makeCompletions sps lf ideState params@(CompletionParams (TextDocumentIdentifier doc) pos _context _mt)
   = do
       mprefix <- getPrefixAtPos lf doc pos
-      _snippets <- WithSnippets . completionSnippetsOn <$> getClientConfig lf
 
       let
           combine :: [CompletionResponseResult] -> CompletionResponseResult
@@ -448,7 +447,7 @@ makeCompletions sps lf ideState params@(CompletionParams (TextDocumentIdentifier
                   go (Completions (List ls)) (CompletionList (CompletionListType complete (List ls2)):rest)
                       = go (CompletionList $ CompletionListType complete (List (ls <> ls2))) rest
                   go (CompletionList (CompletionListType complete (List ls))) (CompletionList (CompletionListType complete2 (List ls2)):rest)
-                      = go (CompletionList $ CompletionListType (complete || complete2) (List (ls <> ls2))) rest
+                      = go (CompletionList $ CompletionListType (complete && complete2) (List (ls <> ls2))) rest
                   go (CompletionList (CompletionListType complete (List ls))) (Completions (List ls2):rest)
                       = go (CompletionList $ CompletionListType complete (List (ls <> ls2))) rest
           makeAction (pid,p) = do
