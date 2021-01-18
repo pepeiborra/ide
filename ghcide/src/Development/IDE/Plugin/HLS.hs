@@ -30,7 +30,7 @@ import           Language.Haskell.LSP.Types.Lens as L hiding (formatting, rangeF
 import qualified Language.Haskell.LSP.VFS                as VFS
 import           Text.Regex.TDFA.Text()
 import Development.Shake (Rules)
-import Ide.PluginUtils (getPluginConfig, getProcessID, pluginEnabled, responseError)
+import Ide.PluginUtils (getClientConfig, getPluginConfig, getProcessID, pluginEnabled, responseError)
 import Development.IDE.Core.Tracing
 import Development.IDE.Types.Logger (logDebug)
 
@@ -436,20 +436,20 @@ makeCompletions :: [(PluginId, CompletionProvider IdeState)]
 makeCompletions sps lf ideState params@(CompletionParams (TextDocumentIdentifier doc) pos _context _mt)
   = do
       mprefix <- getPrefixAtPos lf doc pos
+      config <- getClientConfig lf
 
       let
           combine :: [CompletionResponseResult] -> CompletionResponseResult
-          combine cs = go (Completions $ List []) cs
-              where
-                  go acc [] = acc
-                  go (Completions (List ls)) (Completions (List ls2):rest)
-                      = go (Completions (List (ls <> ls2))) rest
-                  go (Completions (List ls)) (CompletionList (CompletionListType complete (List ls2)):rest)
-                      = go (CompletionList $ CompletionListType complete (List (ls <> ls2))) rest
-                  go (CompletionList (CompletionListType complete (List ls))) (CompletionList (CompletionListType complete2 (List ls2)):rest)
-                      = go (CompletionList $ CompletionListType (complete && complete2) (List (ls <> ls2))) rest
-                  go (CompletionList (CompletionListType complete (List ls))) (Completions (List ls2):rest)
-                      = go (CompletionList $ CompletionListType complete (List (ls <> ls2))) rest
+          combine cs = go (maxCompletions config) True [] [] cs
+
+          go _ !comp !acc [] [] = CompletionList (CompletionListType comp (List $ reverse acc))
+          go 0 _ acc _ _ = CompletionList (CompletionListType False (List $ reverse acc))
+          go n comp acc (x : xx) cc = go (pred n) comp (x : acc) xx cc
+          go n comp acc [] (Completions (List ls) : rest) =
+            go (pred n) comp acc ls rest
+          go n comp acc [] (CompletionList (CompletionListType comp' (List ls)) : rest) =
+            go n (comp && comp') acc ls rest
+
           makeAction (pid,p) = do
             pluginConfig <- getPluginConfig lf pid
             if pluginEnabled pluginConfig plcCompletionOn

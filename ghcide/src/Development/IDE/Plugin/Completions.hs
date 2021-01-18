@@ -26,7 +26,7 @@ import Development.IDE.GHC.Compat
 import Development.IDE.GHC.Util
 import TcRnDriver (tcRnImportDecls)
 import Data.Maybe
-import Ide.Plugin.Config (Config (completionSnippetsOn, maxCompletions))
+import Ide.Plugin.Config (Config (completionSnippetsOn))
 import Ide.PluginUtils (getClientConfig)
 import Ide.Types (PluginDescriptor (pluginCompletionProvider, pluginRules), PluginId, defaultPluginDescriptor)
 import Development.IDE.Spans.LocalBindings
@@ -167,8 +167,7 @@ completionsProvider getCached getLocal lsp ide
                 config <- getClientConfig lsp
                 let snippets = WithSnippets . completionSnippetsOn $ config
                 allCompletions <- getCompletions ideOpts cci' parsedMod bindMap pfix' clientCaps snippets
-                let (topCompletions, rest) = splitAt (maxCompletions config) allCompletions
-                pure $ CompletionList (CompletionListType (null rest) (List topCompletions))
+                pure $ Completions (List allCompletions)
               _ -> return (Completions $ List [])
           _ -> return (Completions $ List [])
       _ -> return (Completions $ List [])
