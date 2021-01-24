@@ -4254,7 +4254,12 @@ benchmarkTests =
             , Bench.repetitions = Just 3
             , Bench.buildTool = Bench.Cabal
             } in
-    withResource Bench.setup Bench.cleanUp $ \getResource -> testGroup "benchmark experiments"
+    let setup = do
+            setupResult <- Bench.setup
+            void $ Bench.runBench (runInDir (Bench.benchDir setupResult)) Bench.noopBenchmark
+            return setupResult
+    in
+    withResource setup Bench.cleanUp $ \getResource -> testGroup "benchmark experiments"
     [ testCase (Bench.name e) $ do
         Bench.SetupResult{Bench.benchDir} <- getResource
         res <- Bench.runBench (runInDir benchDir) e

@@ -18,6 +18,7 @@ module Experiments
 , setup
 , runBench
 , exampleToOptions
+, noopBenchmark
 ) where
 import Control.Applicative.Combinators (skipManyTill)
 import Control.Exception.Safe
@@ -219,6 +220,9 @@ benchWithSetup name samples benchSetup experiment = Bench {..}
 bench :: String -> Natural -> Experiment -> Bench
 bench name defSamples =
   benchWithSetup name defSamples (const $ pure ())
+
+noopBenchmark :: Bench
+noopBenchmark = bench "noop" 0 (\_ -> return True)
 
 runBenchmarksFun :: HasConfig => FilePath -> [Bench] -> IO ()
 runBenchmarksFun dir allBenchmarks = do
