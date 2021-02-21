@@ -1,5 +1,5 @@
 module Development.IDE.Main (Arguments(..), defaultMain) where
-import Control.Concurrent.Strict(readVar)
+import Control.Concurrent.Strict(newLock, withLock, readVar)
 import Control.Exception.Safe (
     Exception (displayException),
     catchAny,
@@ -16,7 +16,8 @@ import Data.List.Extra (
  )
 import Data.Maybe (catMaybes, fromMaybe, isJust)
 import qualified Data.Text as T
-import Development.IDE (Action, Rules, noLogging)
+import qualified Data.Text.IO as T
+import Development.IDE (Action, Rules, Logger(..))
 import Development.IDE.Core.Debouncer (newAsyncDebouncer, Debouncer)
 import Development.IDE.Core.FileStore (makeVFSHandle)
 import Development.IDE.Core.OfInterest (
@@ -49,7 +50,6 @@ import Development.IDE.Plugin (
 import Development.IDE.Plugin.HLS (asGhcIdePlugin)
 import Development.IDE.Session (SessionLoadingOptions, loadSessionWithOptions, setInitialDynFlags, getHieDbLoc, runWithDb)
 import Development.IDE.Types.Location (toNormalizedFilePath', NormalizedUri)
-import Development.IDE.Types.Logger (Logger)
 import Development.IDE.Types.Options (
     IdeGhcSession,
     IdeOptions (optCheckParents, optCheckProject, optReportProgress),
@@ -66,7 +66,7 @@ import qualified Language.LSP.Server as LSP
 import qualified System.Directory.Extra as IO
 import System.Exit (ExitCode (ExitFailure), exitWith)
 import System.FilePath (takeExtension, takeFileName)
-import System.IO (hPutStrLn, hSetEncoding, stderr, stdout, utf8)
+import System.IO (hPutStrLn, hSetEncoding, stderr, stdout, utf8, hSetBuffering, BufferMode (LineBuffering))
 import System.Time.Extra (offsetTime, showDuration)
 import Text.Printf (printf)
 import qualified Development.IDE.Plugin.HLS.GhcIde as Ghcide
@@ -74,7 +74,7 @@ import qualified Development.IDE.Plugin.HLS.GhcIde as Ghcide
 data Arguments = Arguments
     { argsOTMemoryProfiling :: Bool
     , argFiles :: Maybe [FilePath]   -- ^ Nothing: lsp server ;  Just: typecheck and exit
-    , argsLogger :: Logger
+    , argsLogger :: IO Logger
     , argsRules :: Rules ()
     , argsHlsPlugins :: IdePlugins IdeState
     , argsGhcidePlugin :: Plugin Config  -- ^ Deprecated
@@ -90,7 +90,7 @@ instance Default Arguments where
     def = Arguments
         { argsOTMemoryProfiling = False
         , argFiles = Nothing
-        , argsLogger = noLogging
+        , argsLogger = stderrLogger
         , argsRules = mainRule >> action kick
         , argsGhcidePlugin = mempty
         , argsHlsPlugins = pluginDescToIdePlugins Ghcide.descriptors
@@ -102,9 +102,18 @@ instance Default Arguments where
         , argsDebouncer = newAsyncDebouncer
         }
 
+-- | Cheap stderr logger that relies on LineBuffering
+stderrLogger :: IO Logger
+stderrLogger = do
+    lock <- newLock
+    return $ Logger $ \p m -> withLock lock $
+        T.hPutStrLn stderr $ "[" <> T.pack (show p) <> "] " <> m
+
 defaultMain :: Arguments -> IO ()
 defaultMain Arguments{..} = do
     pid <- T.pack . show <$> getProcessID
+    logger <- argsLogger
+    hSetBuffering stderr LineBuffering
 
     let hlsPlugin = asGhcIdePlugin argsHlsPlugins
         hlsCommands = allLspCmdIds' pid argsHlsPlugins
@@ -143,7 +152,7 @@ defaultMain Arguments{..} = do
                 initialise
                     rules
                     (Just env)
-                    argsLogger
+                    logger
                     debouncer
                     options
                     vfs
@@ -179,7 +188,7 @@ defaultMain Arguments{..} = do
                         { optCheckParents = pure NeverCheck
                         , optCheckProject = pure False
                         }
-            ide <- initialise rules Nothing argsLogger debouncer options vfs hiedb hieChan
+            ide <- initialise rules Nothing logger debouncer options vfs hiedb hieChan
 
             putStrLn "\nStep 4/4: Type checking the files"
             let ff = map toNormalizedFilePath' files
@@ -212,7 +221,7 @@ defaultMain Arguments{..} = do
                             Key GhcSessionDeps :
                             [k | (_, k) <- HashMap.keys values, k /= Key GhcSessionIO]
                             ++ [Key GhcSessionIO]
-                measureMemory argsLogger [keys] consoleObserver valuesRef
+                measureMemory logger [keys] consoleObserver valuesRef
 
             unless (null failed) (exitWith $ ExitFailure (length failed))
 {-# ANN defaultMain ("HLint: ignore Use nubOrd" :: String) #-}

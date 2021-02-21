@@ -84,7 +84,7 @@ main = do
                 Typecheck x | not argLSP -> Just x
                 _ -> Nothing
 
-            ,Main.argsLogger = logger
+            ,Main.argsLogger = pure logger
 
             ,Main.argsRules = do
                 -- install the main and ghcide-plugin rules
