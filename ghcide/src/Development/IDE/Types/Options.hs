@@ -84,6 +84,7 @@ data IdeOptions = IdeOptions
     -- ^ Will be called right after setting up a new cradle,
     --   allowing to customize the Ghc options used
   , optShakeOptions :: ShakeOptions
+  , optFakeUid :: InstalledUnitId
   }
 
 optShakeFiles :: IdeOptions -> Maybe FilePath
@@ -136,6 +137,7 @@ defaultIdeOptions session = IdeOptions
     ,optCheckParents = pure CheckOnSaveAndClose
     ,optHaddockParse = HaddockParse
     ,optCustomDynFlags = id
+    ,optFakeUid = toInstalledUnitId (stringToUnitId "fake_uid")
     }
 
 
