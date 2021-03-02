@@ -80,7 +80,7 @@ import Development.IDE.Spans.LocalBindings
 import Development.IDE.Import.DependencyInformation
 import Development.IDE.Import.FindImports
 import           Development.IDE.Core.FileExists
-import           Development.IDE.Core.FileStore        (modificationTime, getFileContents)
+import           Development.IDE.Core.FileStore        (modificationTime, getFileContents, resetInterfaceStore)
 import           Development.IDE.Types.Diagnostics as Diag
 import Development.IDE.Types.Location
 import Development.IDE.GHC.Compat hiding (parseModule, typecheckModule, writeHieFile, TargetModule, TargetFile)
@@ -909,7 +909,7 @@ getModIfaceRule = defineEarlyCutoff $ \GetModIface f -> do
       hiDiags <- case hiFile of
         Just hiFile
           | OnDisk <- status
-          , not (tmrDeferedError tmr) -> liftIO $ writeHiFile hsc hiFile
+          , not (tmrDeferedError tmr) -> writeHiFileAction hsc hiFile
         _ -> pure []
       return (fp, (diags++hiDiags, hiFile))
     NotFOI -> do
@@ -978,7 +978,7 @@ regenerateHiFile sess f ms compNeeded = do
                     -- We don't write the `.hi` file if there are defered errors, since we won't get
                     -- accurate diagnostics next time if we do
                     hiDiags <- if not $ tmrDeferedError tmr
-                               then liftIO $ writeHiFile hsc hiFile
+                               then writeHiFileAction hsc hiFile
                                else pure []
 
                     pure (hiDiags <> gDiags <> concat wDiags)
@@ -1059,7 +1059,14 @@ needsCompilationRule = defineEarlyCutoff $ \NeedsCompilation file -> do
 newtype CompiledLinkables = CompiledLinkables { getCompiledLinkables :: Var (ModuleEnv UTCTime) }
 instance IsIdeGlobal CompiledLinkables
 
--- | A rule that wires per-file rules together
+writeHiFileAction :: HscEnv -> HiFileResult -> Action [FileDiagnostic]
+writeHiFileAction hsc hiFile = do
+    extras <- getShakeExtras
+    let targetPath = ml_hi_file $ ms_location $ hirModSummary hiFile
+    liftIO $ do
+        resetInterfaceStore extras targetPath
+        writeHiFile hsc hiFile
+
 mainRule :: Rules ()
 mainRule = do
     linkables <- liftIO $ newVar emptyModuleEnv
