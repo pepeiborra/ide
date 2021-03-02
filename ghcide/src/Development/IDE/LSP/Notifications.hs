@@ -24,13 +24,11 @@ import           Development.IDE.Types.Logger
 import           Development.IDE.Types.Options
 
 import           Control.Monad.Extra
-import           Data.Foldable                    as F
-import           Data.Maybe
 import qualified Data.HashMap.Strict              as M
 import qualified Data.HashSet                     as S
 import qualified Data.Text                        as Text
 
-import           Development.IDE.Core.FileStore   (setSomethingModified, setFileModified, typecheckParents)
+import           Development.IDE.Core.FileStore   (setSomethingModified, setFileModified, typecheckParents, modifyFileStore)
 import           Development.IDE.Core.FileExists  (modifyFileExists, watchedGlobs)
 import           Development.IDE.Core.OfInterest
 import Ide.Plugin.Config (CheckParents(CheckOnClose))
@@ -77,19 +75,13 @@ setHandlersNotifications = mconcat
               logDebug (ideLogger ide) $ "Closed text document: " <> getUri _uri
 
   , notificationHandler LSP.SWorkspaceDidChangeWatchedFiles $
-      \ide (DidChangeWatchedFilesParams fileEvents) -> liftIO $ do
+      \ide (DidChangeWatchedFilesParams (List fileEvents)) -> liftIO $ do
         -- See Note [File existence cache and LSP file watchers] which explains why we get these notifications and
         -- what we do with them
-        let events =
-                mapMaybe
-                    (\(FileEvent uri ev) ->
-                        (, ev /= FcDeleted) . toNormalizedFilePath'
-                        <$> LSP.uriToFilePath uri
-                    )
-                    ( F.toList fileEvents )
-        let msg = Text.pack $ show events
+        let msg = Text.pack $ show fileEvents
         logDebug (ideLogger ide) $ "Files created or deleted: " <> msg
-        modifyFileExists ide events
+        modifyFileExists ide fileEvents
+        modifyFileStore ide fileEvents
         setSomethingModified ide
 
   , notificationHandler LSP.SWorkspaceDidChangeWorkspaceFolders $
