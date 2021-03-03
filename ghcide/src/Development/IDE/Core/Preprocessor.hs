@@ -35,7 +35,7 @@ import HscTypes (HscEnv(hsc_dflags))
 
 -- | Given a file and some contents, apply any necessary preprocessors,
 --   e.g. unlit/cpp. Return the resulting buffer and the DynFlags it implies.
-preprocessor :: HscEnv -> FilePath -> Maybe StringBuffer -> ExceptT [FileDiagnostic] IO (StringBuffer, DynFlags)
+preprocessor :: HscEnv -> FilePath -> Maybe StringBuffer -> ExceptT [FileDiagnostic] IO (StringBuffer, [String], DynFlags)
 preprocessor env filename mbContents = do
     -- Perform unlit
     (isOnDisk, contents) <-
@@ -49,10 +49,10 @@ preprocessor env filename mbContents = do
             return (isOnDisk, contents)
 
     -- Perform cpp
-    dflags  <- ExceptT $ parsePragmasIntoDynFlags env filename contents
-    (isOnDisk, contents, dflags) <-
+    (opts, dflags) <- ExceptT $ parsePragmasIntoDynFlags env filename contents
+    (isOnDisk, contents, opts, dflags) <-
         if not $ xopt LangExt.Cpp dflags then
-            return (isOnDisk, contents, dflags)
+            return (isOnDisk, contents, opts, dflags)
         else do
             cppLogs <- liftIO $ newIORef []
             contents <- ExceptT
@@ -65,16 +65,16 @@ preprocessor env filename mbContents = do
                                   [] -> throw e
                                   diags -> return $ Left diags
                             )
-            dflags <- ExceptT $ parsePragmasIntoDynFlags env filename contents
-            return (False, contents, dflags)
+            (opts, dflags) <- ExceptT $ parsePragmasIntoDynFlags env filename contents
+            return (False, contents, opts, dflags)
 
     -- Perform preprocessor
     if not $ gopt Opt_Pp dflags then
-        return (contents, dflags)
+        return (contents, opts, dflags)
     else do
         contents <- liftIO $ runPreprocessor dflags filename $ if isOnDisk then Nothing else Just contents
-        dflags <- ExceptT $ parsePragmasIntoDynFlags env filename contents
-        return (contents, dflags)
+        (opts, dflags) <- ExceptT $ parsePragmasIntoDynFlags env filename contents
+        return (contents, opts, dflags)
   where
     logAction :: IORef [CPPLog] -> LogAction
     logAction cppLogs dflags _reason severity srcSpan _style msg = do
@@ -133,7 +133,7 @@ parsePragmasIntoDynFlags
     :: HscEnv
     -> FilePath
     -> SB.StringBuffer
-    -> IO (Either [FileDiagnostic] DynFlags)
+    -> IO (Either [FileDiagnostic] ([String], DynFlags))
 parsePragmasIntoDynFlags env fp contents = catchSrcErrors dflags0 "pragmas" $ do
     let opts = Hdr.getOptions dflags0 contents fp
 
@@ -142,7 +142,7 @@ parsePragmasIntoDynFlags env fp contents = catchSrcErrors dflags0 "pragmas" $ do
 
     (dflags, _, _) <- parseDynamicFilePragma dflags0 opts
     dflags' <- initializePlugins env dflags
-    return $ disableWarningsAsErrors dflags'
+    return (map unLoc opts, disableWarningsAsErrors dflags')
   where dflags0 = hsc_dflags env
 
 -- | Run (unlit) literate haskell preprocessor on a file, or buffer if set

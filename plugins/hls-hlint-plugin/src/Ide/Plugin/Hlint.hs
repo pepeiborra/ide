@@ -220,8 +220,8 @@ getExtensions pflags nfp = do
     return hlintExts
   where getFlags :: Action DynFlags
         getFlags = do
-          (modsum, _) <- use_ GetModSummary nfp
-          return $ ms_hspp_opts modsum
+          modsum <- use_ GetModSummary nfp
+          return $ ms_hspp_opts $ msrModSummary modsum
 #endif
 
 -- ---------------------------------------------------------------------
@@ -364,8 +364,8 @@ applyHint ide nfp mhint =
     let fp = fromNormalizedFilePath nfp
     (_, mbOldContent) <- liftIO $ runAction' $ getFileContents nfp
     oldContent <- maybe (liftIO $ T.readFile fp) return mbOldContent
-    (modsum, _) <- liftIO $ runAction' $ use_ GetModSummary nfp
-    let dflags = ms_hspp_opts modsum
+    msr <- liftIO $ runAction' $ use_ GetModSummary nfp
+    let dflags = ms_hspp_opts $ msrModSummary modsum
     -- set Nothing as "position" for "applyRefactorings" because
     -- applyRefactorings expects the provided position to be _within_ the scope
     -- of each refactoring it will apply.
