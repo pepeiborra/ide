@@ -122,8 +122,6 @@ import Control.Exception.Safe
 
 import Data.Coerce
 import Control.Monad.State
-import FastString (FastString(uniq))
-import qualified HeaderInfo as Hdr
 import Data.Time (UTCTime(..))
 import Data.Hashable
 import qualified Data.HashSet as HashSet
@@ -1037,7 +1035,7 @@ needsCompilationRule = defineEarlyCutoff $ \NeedsCompilation file -> do
   -- Once M is fixed we will discover that we actually needed all the object code
   -- that we just threw away, and thus have to recompile all dependencies once
   -- again, this time keeping the object code.
-  ms <- msrModSummary fst <$> useWithStale_ GetModSummaryWithoutTimestamps file
+  ms <- msrModSummary . fst <$> useWithStale_ GetModSummaryWithoutTimestamps file
   -- A file needs object code if it uses TemplateHaskell or any file that depends on it uses TemplateHaskell
   res <-
     if uses_th_qq ms
