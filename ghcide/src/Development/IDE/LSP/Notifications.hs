@@ -28,7 +28,7 @@ import qualified Data.HashMap.Strict              as M
 import qualified Data.HashSet                     as S
 import qualified Data.Text                        as Text
 
-import           Development.IDE.Core.FileStore   (setSomethingModified, setFileModified, typecheckParents, modifyFileStore)
+import           Development.IDE.Core.FileStore   (setSomethingModified, setFileModified, typecheckParents, resetFileStore)
 import           Development.IDE.Core.FileExists  (modifyFileExists, watchedGlobs)
 import           Development.IDE.Core.OfInterest
 import Ide.Plugin.Config (CheckParents(CheckOnClose))
@@ -81,7 +81,7 @@ setHandlersNotifications = mconcat
         let msg = Text.pack $ show fileEvents
         logDebug (ideLogger ide) $ "Files created or deleted: " <> msg
         modifyFileExists ide fileEvents
-        modifyFileStore ide fileEvents
+        resetFileStore ide fileEvents
         setSomethingModified ide
 
   , notificationHandler LSP.SWorkspaceDidChangeWorkspaceFolders $

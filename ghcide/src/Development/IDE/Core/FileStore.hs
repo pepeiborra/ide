@@ -15,7 +15,7 @@ module Development.IDE.Core.FileStore(
     makeVFSHandle,
     makeLSPVFSHandle,
     isFileOfInterestRule
-    ,modifyFileStore) where
+    ,resetFileStore) where
 
 import Development.IDE.GHC.Orphans()
 import           Development.IDE.Core.Shake
@@ -37,7 +37,7 @@ import System.IO.Error
 import qualified Data.ByteString.Char8 as BS
 import Development.IDE.Types.Diagnostics
 import Development.IDE.Types.Location
-import Development.IDE.Core.OfInterest (getFilesOfInterest)
+import Development.IDE.Core.OfInterest (getFilesOfInterest, OfInterestVar(..))
 import Development.IDE.Core.RuleTypes
 import Development.IDE.Types.Options
 import qualified Data.Rope.UTF16 as Rope
@@ -62,7 +62,7 @@ import qualified Development.IDE.Types.Logger as L
 import Language.LSP.Server hiding (getVirtualFile)
 import qualified Language.LSP.Server as LSP
 import Language.LSP.VFS
-import Language.LSP.Types (FileEvent(FileEvent), FileChangeType (FcChanged), uriToFilePath)
+import Language.LSP.Types (FileEvent(FileEvent), FileChangeType (FcChanged), uriToFilePath, toNormalizedFilePath)
 
 makeVFSHandle :: IO VFSHandle
 makeVFSHandle = do
@@ -115,15 +115,20 @@ getModificationTimeRule vfs isWatched =
                             else return (Nothing, ([diag], Nothing))
 
 -- | Reset the GetModificationTime state of watched files
-modifyFileStore :: IdeState -> [FileEvent] -> IO ()
-modifyFileStore state changes = mask $ \_ ->
+resetFileStore :: IdeState -> [FileEvent] -> IO ()
+resetFileStore ideState changes = mask $ \_ ->
     forM_ changes $ \(FileEvent uri c) ->
         case c of
             FcChanged
               | Just f <- uriToFilePath uri
               -> do
-                  deleteValue state (GetModificationTime_ True) (toNormalizedFilePath' f)
-                  deleteValue state (GetModificationTime_ False) (toNormalizedFilePath' f)
+                  -- we record FOIs document versions in all the stored values
+                  -- so NEVER reset FOIs to avoid losing their versions
+                  OfInterestVar foisVar <- getIdeGlobalExtras (shakeExtras ideState)
+                  fois <- readVar foisVar
+                  unless (HM.member (toNormalizedFilePath f) fois) $ do
+                    deleteValue ideState (GetModificationTime_ True) (toNormalizedFilePath' f)
+                    deleteValue ideState (GetModificationTime_ False) (toNormalizedFilePath' f)
             _ -> pure ()
 
 -- Dir.getModificationTime is surprisingly slow since it performs
