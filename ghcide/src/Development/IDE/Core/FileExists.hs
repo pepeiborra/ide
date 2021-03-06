@@ -13,7 +13,6 @@ where
 import           Control.Concurrent.Extra
 import           Control.Exception
 import           Control.Monad.Extra
-import           Data.Binary
 import qualified Data.ByteString               as BS
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
@@ -24,13 +23,12 @@ import           Development.IDE.Core.Shake
 import           Development.IDE.Types.Location
 import           Development.IDE.Types.Options
 import           Development.Shake
-import           Development.Shake.Classes
-import           GHC.Generics
 import           Language.LSP.Server hiding (getVirtualFile)
 import           Language.LSP.Types
 import           Language.LSP.Types.Capabilities
 import qualified System.Directory as Dir
 import qualified System.FilePath.Glob as Glob
+import Development.IDE.Core.RuleTypes (GetFileExists(GetFileExists))
 
 {- Note [File existence cache and LSP file watchers]
 Some LSP servers provide the ability to register file watches with the client, which will then notify
@@ -111,15 +109,6 @@ fromChange FcDeleted = Just True
 fromChange FcChanged = Nothing
 
 -------------------------------------------------------------------------------------
-
-type instance RuleResult GetFileExists = Bool
-
-data GetFileExists = GetFileExists
-    deriving (Eq, Show, Typeable, Generic)
-
-instance NFData   GetFileExists
-instance Hashable GetFileExists
-instance Binary   GetFileExists
 
 -- | Returns True if the file exists
 --   Note that a file is not considered to exist unless it is saved to disk.

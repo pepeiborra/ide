@@ -893,8 +893,8 @@ defineEarlyCutoff
     -> Rules ()
 defineEarlyCutoff op = addBuiltinRule noLint noIdentity $ \(Q (key, file)) (old :: Maybe BS.ByteString) mode -> otTracedAction key file isSuccess $ do
     extras@ShakeExtras{state, inProgress} <- getShakeExtras
-    -- don't do progress for GetFileExists, as there are lots of non-nodes for just that one key
-    (if show key == "GetFileExists" then id else withProgressVar inProgress file) $ do
+    options <- getIdeOptions
+    (if optSkipProgress options key then id else withProgressVar inProgress file) $ do
         val <- case old of
             Just old | mode == RunDependenciesSame -> do
                 v <- liftIO $ getValues state key file
@@ -939,7 +939,7 @@ defineEarlyCutoff op = addBuiltinRule noLint noIdentity $ \(Q (key, file)) (old 
                     (encodeShakeValue bs) $
                     A res
   where
-    withProgressVar :: (Eq a, Hashable a) => Var (HMap.HashMap a Int) -> a -> Action b -> Action b
+    withProgressVar :: Var (HMap.HashMap NormalizedFilePath Int) -> NormalizedFilePath -> Action b -> Action b
     withProgressVar var file = actionBracket (f succ) (const $ f pred) . const
         -- This functions are deliberately eta-expanded to avoid space leaks.
         -- Do not remove the eta-expansion without profiling a session with at

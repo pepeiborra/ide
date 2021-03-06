@@ -39,11 +39,11 @@ import Data.ByteString (ByteString)
 import Language.LSP.Types (NormalizedFilePath)
 import TcRnMonad (TcGblEnv)
 import qualified Data.ByteString.Char8 as BS
-import Development.IDE.Types.Options (IdeGhcSession)
 import Data.Text (Text)
 import Data.Int (Int64)
 import GHC.Serialized (Serialized)
 import Fingerprint (Fingerprint)
+import Development.IDE.Types.Diagnostics
 
 data LinkableType = ObjectLinkable | BCOLinkable
   deriving (Eq,Ord,Show)
@@ -248,6 +248,9 @@ type instance RuleResult GetModIfaceWithoutLinkable = HiFileResult
 -- | Get the contents of a file, either dirty (if the buffer is modified) or Nothing to mean use from disk.
 type instance RuleResult GetFileContents = (FileVersion, Maybe Text)
 
+type instance RuleResult GetFileExists = Bool
+
+
 -- The Shake key type for getModificationTime queries
 newtype GetModificationTime = GetModificationTime_
     { missingFileDiagnostics :: Bool
@@ -293,6 +296,12 @@ instance Hashable GetFileContents
 instance NFData   GetFileContents
 instance Binary   GetFileContents
 
+data GetFileExists = GetFileExists
+    deriving (Eq, Show, Typeable, Generic)
+
+instance NFData   GetFileExists
+instance Hashable GetFileExists
+instance Binary   GetFileExists
 
 data FileOfInterestStatus
   = OnDisk
@@ -471,6 +480,16 @@ type instance RuleResult GetClientSettings = Hashed (Maybe Value)
 -- thread killed exception issues, so we lift it to a full rule.
 -- https://github.com/digital-asset/daml/pull/2808#issuecomment-529639547
 type instance RuleResult GhcSessionIO = IdeGhcSession
+
+data IdeGhcSession = IdeGhcSession
+  { loadSessionFun :: FilePath -> IO (IdeResult HscEnvEq, [FilePath])
+  -- ^ Returns the Ghc session and the cradle dependencies
+  , sessionVersion :: !Int
+  -- ^ Used as Shake key, versions must be unique and not reused
+  }
+
+instance Show IdeGhcSession where show _ = "IdeGhcSession"
+instance NFData IdeGhcSession where rnf !_ = ()
 
 data GhcSessionIO = GhcSessionIO deriving (Eq, Show, Typeable, Generic)
 instance Hashable GhcSessionIO

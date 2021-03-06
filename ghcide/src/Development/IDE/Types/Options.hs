@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: Apache-2.0
 
 -- | Options
+{-# LANGUAGE RankNTypes #-}
 module Development.IDE.Types.Options
   ( IdeOptions(..)
   , IdePreprocessedSource(..)
@@ -18,24 +19,14 @@ module Development.IDE.Types.Options
   ,optShakeFiles) where
 
 import Development.Shake
-import Development.IDE.Types.HscEnvEq (HscEnvEq)
 import           GHC hiding (parseModule, typecheckModule)
 import           GhcPlugins                     as GHC hiding (fst3, (<>))
 import qualified Language.LSP.Types.Capabilities as LSP
 import qualified Data.Text as T
 import Development.IDE.Types.Diagnostics
-import Control.DeepSeq (NFData(..))
 import Ide.Plugin.Config
-
-data IdeGhcSession = IdeGhcSession
-  { loadSessionFun :: FilePath -> IO (IdeResult HscEnvEq, [FilePath])
-  -- ^ Returns the Ghc session and the cradle dependencies
-  , sessionVersion :: !Int
-  -- ^ Used as Shake key, versions must be unique and not reused
-  }
-
-instance Show IdeGhcSession where show _ = "IdeGhcSession"
-instance NFData IdeGhcSession where rnf !_ = ()
+import Data.Typeable
+import Development.IDE.Core.RuleTypes
 
 data IdeOptions = IdeOptions
   { optPreprocessor :: GHC.ParsedSource -> IdePreprocessedSource
@@ -85,6 +76,10 @@ data IdeOptions = IdeOptions
     --   allowing to customize the Ghc options used
   , optShakeOptions :: ShakeOptions
   , optFakeUid :: InstalledUnitId
+  , optSkipProgress :: forall a. Typeable a => a -> Bool
+      -- ^ Predicate to select which rule keys to exclude from progress reporting.
+      --   The current implementation of progress reporting is very expensive,
+      --   O(F*logF*R) on the number of Files and Rules
   }
 
 optShakeFiles :: IdeOptions -> Maybe FilePath
@@ -138,7 +133,16 @@ defaultIdeOptions session = IdeOptions
     ,optHaddockParse = HaddockParse
     ,optCustomDynFlags = id
     ,optFakeUid = toInstalledUnitId (stringToUnitId "main")
+    ,optSkipProgress = defaultSkipProgress
     }
+
+defaultSkipProgress :: Typeable a => a -> Bool
+defaultSkipProgress key = case () of
+    _ | Just GetFileContents <- cast key -> True
+    _ | Just GetFileExists <- cast key -> True
+    _ | Just GetModificationTime_{} <- cast key -> True
+    _ | Just GhcSession{} <- cast key -> True
+    _ -> False
 
 
 -- | The set of options used to locate files belonging to external packages.
