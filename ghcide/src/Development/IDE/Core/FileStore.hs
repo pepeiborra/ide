@@ -69,6 +69,7 @@ import qualified Language.LSP.Server as LSP
 import Language.LSP.VFS
 import Language.LSP.Types (FileEvent(FileEvent), FileChangeType (FcChanged), uriToFilePath, toNormalizedFilePath)
 import System.FilePath
+import Data.Bifunctor
 
 makeVFSHandle :: IO VFSHandle
 makeVFSHandle = do
@@ -99,8 +100,8 @@ isFileOfInterestRule = defineEarlyCutoff $ RuleNoDiagnostics $ \IsFileOfInterest
     return (Just $ BS.pack $ show $ hash res, Just res)
 
 getModificationTimeRule :: VFSHandle -> (NormalizedFilePath -> Action Bool) -> Rules ()
-getModificationTimeRule vfs isWatched = defineEarlyCutoff $ Rule $ \(GetModificationTime_ missingFileDiags) file ->
-    getModificationTimeImpl vfs isWatched missingFileDiags file
+getModificationTimeRule vfs isWatched = defineEarlyCutoff $ RuleNoDiagnostics $ \(GetModificationTime_ missingFileDiags) file ->
+    second snd <$> getModificationTimeImpl vfs isWatched missingFileDiags file
 
 getModificationTimeImpl :: VFSHandle
     -> (NormalizedFilePath -> Action Bool)
