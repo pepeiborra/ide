@@ -905,19 +905,20 @@ defineEarlyCutoff
     => RuleBody k v
     -> Rules ()
 defineEarlyCutoff (Rule op) = addBuiltinRule noLint noIdentity $ \(Q (key, file)) (old :: Maybe BS.ByteString) mode -> otTracedAction key file isSuccess $ do
-    defineEarlyCutoff' key file old mode $ op key file
+    defineEarlyCutoff' True key file old mode $ op key file
 defineEarlyCutoff (RuleNoDiagnostics op) = addBuiltinRule noLint noIdentity $ \(Q (key, file)) (old :: Maybe BS.ByteString) mode -> otTracedAction key file isSuccess $ do
-    defineEarlyCutoff' key file old mode $ second (mempty,) <$> op key file
+    defineEarlyCutoff' False key file old mode $ second (mempty,) <$> op key file
 
 defineEarlyCutoff'
     :: IdeRule k v
-    => k
+    => Bool  -- ^ update diagnostics
+    -> k
     -> NormalizedFilePath
     -> Maybe BS.ByteString
     -> RunMode
     -> Action (Maybe BS.ByteString, IdeResult v)
     -> Action (RunResult (A (RuleResult k)))
-defineEarlyCutoff' key file old mode action = do
+defineEarlyCutoff' doDiagnostics key file old mode action = do
     extras@ShakeExtras{state, inProgress} <- getShakeExtras
     options <- getIdeOptions
     (if optSkipProgress options key then id else withProgressVar inProgress file) $ do
@@ -928,7 +929,8 @@ defineEarlyCutoff' key file old mode action = do
                     -- No changes in the dependencies and we have
                     -- an existing result.
                     Just (v, diags) -> do
-                        updateFileDiagnostics file (Key key) extras $ map (\(_,y,z) -> (y,z)) $ Vector.toList diags
+                        when doDiagnostics $
+                            updateFileDiagnostics file (Key key) extras $ map (\(_,y,z) -> (y,z)) $ Vector.toList diags
                         return $ Just $ RunResult ChangedNothing old $ A v
                     _ -> return Nothing
             _ -> return Nothing
@@ -953,7 +955,8 @@ defineEarlyCutoff' key file old mode action = do
                                     (toShakeValue ShakeResult bs, Failed b)
                     Just v -> pure (maybe ShakeNoCutoff ShakeResult bs, Succeeded (vfsVersion =<< modTime) v)
                 liftIO $ setValues state key file res (Vector.fromList diags)
-                updateFileDiagnostics file (Key key) extras $ map (\(_,y,z) -> (y,z)) diags
+                when doDiagnostics $
+                    updateFileDiagnostics file (Key key) extras $ map (\(_,y,z) -> (y,z)) diags
                 let eq = case (bs, fmap decodeShakeValue old) of
                         (ShakeResult a, Just (ShakeResult b)) -> a == b
                         (ShakeStale a, Just (ShakeStale b)) -> a == b
