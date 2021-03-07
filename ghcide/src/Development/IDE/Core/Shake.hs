@@ -891,7 +891,7 @@ defineEarlyCutoff
     :: IdeRule k v
     => (k -> NormalizedFilePath -> Action (Maybe BS.ByteString, IdeResult v))
     -> Rules ()
-defineEarlyCutoff op = addBuiltinRule noLint noIdentity $ \(Q (key, file)) (old :: Maybe BS.ByteString) mode -> otTracedAction key file isSuccess $ do
+defineEarlyCutoff op = addBuiltinRule noLint noIdentity $ \(Q (key, file)) (old :: Maybe BS.ByteString) mode -> do
     extras@ShakeExtras{state, inProgress} <- getShakeExtras
     options <- getIdeOptions
     (if optSkipProgress options key then id else withProgressVar inProgress file) $ do
