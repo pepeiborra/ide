@@ -14,9 +14,12 @@ module Development.IDE.Core.FileStore(
     VFSHandle,
     makeVFSHandle,
     makeLSPVFSHandle,
-    isFileOfInterestRule
-    ,resetFileStore
-    ,resetInterfaceStore
+    isFileOfInterestRule,
+    resetFileStore,
+    resetInterfaceStore,
+    getModificationTimeImpl,
+    addIdeGlobal,
+    getFileContentsRule,
     ) where
 
 import Development.IDE.GHC.Orphans()
@@ -90,14 +93,22 @@ makeLSPVFSHandle lspEnv = VFSHandle
 
 
 isFileOfInterestRule :: Rules ()
-isFileOfInterestRule = defineEarlyCutoff $ \IsFileOfInterest f -> do
+isFileOfInterestRule = defineEarlyCutoff $ RuleNoDiagnostics $ \IsFileOfInterest f -> do
     filesOfInterest <- getFilesOfInterest
     let res = maybe NotFOI IsFOI $ f `HM.lookup` filesOfInterest
-    return (Just $ BS.pack $ show $ hash res, ([], Just res))
+    return (Just $ BS.pack $ show $ hash res, Just res)
 
 getModificationTimeRule :: VFSHandle -> (NormalizedFilePath -> Action Bool) -> Rules ()
-getModificationTimeRule vfs isWatched =
-    defineEarlyCutoff $ \(GetModificationTime_ missingFileDiags) file -> do
+getModificationTimeRule vfs isWatched = defineEarlyCutoff $ Rule $ \(GetModificationTime_ missingFileDiags) file ->
+    getModificationTimeImpl vfs isWatched missingFileDiags file
+
+getModificationTimeImpl :: VFSHandle
+    -> (NormalizedFilePath -> Action Bool)
+    -> Bool
+    -> NormalizedFilePath
+    -> Action
+        (Maybe BS.ByteString, ([FileDiagnostic], Maybe FileVersion))
+getModificationTimeImpl vfs isWatched missingFileDiags file = do
         let file' = fromNormalizedFilePath file
         let wrap time@(l,s) = (Just $ BS.pack $ show time, ([], Just $ ModificationTime l s))
         mbVirtual <- liftIO $ getVirtualFile vfs $ filePathToUri' file
