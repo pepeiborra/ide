@@ -19,7 +19,7 @@ module Development.IDE.Core.FileStore(
     resetInterfaceStore,
     getModificationTimeImpl,
     addIdeGlobal,
-    getFileContentsRule,
+    getFileContentsImpl
     ) where
 
 import Development.IDE.GHC.Orphans()
@@ -201,16 +201,21 @@ internalTimeToUTCTime large small =
 #endif
 
 getFileContentsRule :: VFSHandle -> Rules ()
-getFileContentsRule vfs =
-    defineNoDiagnostics $ \GetFileContents file -> do
-        -- need to depend on modification time to introduce a dependency with Cutoff
-        time <- use_ GetModificationTime file
-        res <- liftIO $ ideTryIOException file $ do
-            mbVirtual <- getVirtualFile vfs $ filePathToUri' file
-            pure $ Rope.toText . _text <$> mbVirtual
-        case res of
-            Left _err -> return Nothing
-            Right contents -> return (Just (time, contents))
+getFileContentsRule vfs = defineNoDiagnostics $ \GetFileContents file -> snd <$> getFileContentsImpl vfs file
+
+getFileContentsImpl
+    :: VFSHandle
+    -> NormalizedFilePath
+    -> Action ([FileDiagnostic], Maybe (FileVersion, Maybe T.Text))
+getFileContentsImpl vfs file = do
+    -- need to depend on modification time to introduce a dependency with Cutoff
+    time <- use_ GetModificationTime file
+    res <- liftIO $ ideTryIOException file $ do
+        mbVirtual <- getVirtualFile vfs $ filePathToUri' file
+        pure $ Rope.toText . _text <$> mbVirtual
+    case res of
+        Left err       -> return ([err], Nothing)
+        Right contents -> return ([], Just (time, contents))
 
 ideTryIOException :: NormalizedFilePath -> IO a -> IO (Either FileDiagnostic a)
 ideTryIOException fp act =
