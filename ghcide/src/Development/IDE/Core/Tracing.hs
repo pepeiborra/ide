@@ -30,6 +30,7 @@ import           Development.IDE.Types.Shake    (ValueWithDiagnostics(..), Key (
 import           Development.Shake              (Action, actionBracket)
 import           Ide.PluginUtils                (installSigUsr1Handler)
 import           Foreign.Storable               (Storable (sizeOf))
+import           GHC.RTS.Flags
 import           HeapSize                       (recursiveSize, runHeapsize)
 import           Language.LSP.Types             (NormalizedFilePath,
                                                  fromNormalizedFilePath)
@@ -42,6 +43,7 @@ import Data.Text.Encoding (encodeUtf8)
 import Ide.Types (PluginId (..))
 import Development.IDE.Types.Location (Uri (..))
 import Control.Monad.IO.Unlift
+import System.IO.Unsafe
 
 -- | Trace a handler using OpenTelemetry. Adds various useful info into tags in the OpenTelemetry span.
 otTracedHandler
@@ -63,6 +65,14 @@ otTracedHandler requestType label act =
 otSetUri :: SpanInFlight -> Uri -> IO ()
 otSetUri sp (Uri t) = setTag sp "uri" (encodeUtf8 t)
 
+{-# NOINLINE isTracingEnabled #-}
+isTracingEnabled :: Bool
+isTracingEnabled = unsafePerformIO $ do
+    flags <- getTraceFlags
+    case tracing flags of
+        TraceNone -> return False
+        _         -> return True
+
 -- | Trace a Shake action using opentelemetry.
 otTracedAction
     :: Show k
@@ -71,17 +81,21 @@ otTracedAction
     -> (a -> Bool) -- ^ Did this action succeed?
     -> Action a -- ^ The action
     -> Action a
-otTracedAction key file success act = actionBracket
-    (do
-        sp <- beginSpan (fromString (show key))
-        setTag sp "File" (fromString $ fromNormalizedFilePath file)
-        return sp
-    )
-    endSpan
-    (\sp -> do
-        res <- act
-        unless (success res) $ setTag sp "error" "1"
-        return res)
+otTracedAction key file success act
+  | isTracingEnabled =
+    actionBracket
+        (do
+            sp <- beginSpan (fromString (show key))
+            setTag sp "File" (fromString $ fromNormalizedFilePath file)
+            return sp
+        )
+        endSpan
+        (\sp -> do
+            res <- act
+            unless (success res) $ setTag sp "error" "1"
+            return res)
+  | otherwise = act
+
 
 #if MIN_GHC_API_VERSION(8,8,0)
 otTracedProvider :: MonadUnliftIO m => PluginId -> ByteString -> m a -> m a
@@ -215,3 +229,4 @@ repeatUntilJust nattempts action = do
     case res of
         Nothing -> repeatUntilJust (nattempts-1) action
         Just{}  -> return res
+
