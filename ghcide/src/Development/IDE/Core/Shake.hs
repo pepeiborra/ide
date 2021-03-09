@@ -919,7 +919,7 @@ defineEarlyCutoff'
     -> Action (Maybe BS.ByteString, IdeResult v)
     -> Action (RunResult (A (RuleResult k)))
 defineEarlyCutoff' doDiagnostics key file old mode action = do
-    extras@ShakeExtras{state, inProgress} <- getShakeExtras
+    extras@ShakeExtras{state, inProgress, logger} <- getShakeExtras
     options <- getIdeOptions
     (if optSkipProgress options key then id else withProgressVar inProgress file) $ do
         val <- case old of
@@ -939,7 +939,8 @@ defineEarlyCutoff' doDiagnostics key file old mode action = do
             Nothing -> do
                 (bs, (diags, res)) <- actionCatch
                     (do v <- action; liftIO $ evaluate $ force v) $
-                    \(e :: SomeException) -> pure (Nothing, ([ideErrorText file $ T.pack $ show e | not $ isBadDependency e],Nothing))
+                    \(e :: SomeException) -> do
+                        pure (Nothing, ([ideErrorText file $ T.pack $ show e | not $ isBadDependency e],Nothing))
                 modTime <- liftIO $ (currentValue . fst =<<) <$> getValues state GetModificationTime file
                 (bs, res) <- case res of
                     Nothing -> do
@@ -955,8 +956,9 @@ defineEarlyCutoff' doDiagnostics key file old mode action = do
                                     (toShakeValue ShakeResult bs, Failed b)
                     Just v -> pure (maybe ShakeNoCutoff ShakeResult bs, Succeeded (vfsVersion =<< modTime) v)
                 liftIO $ setValues state key file res (Vector.fromList diags)
-                when doDiagnostics $
-                    updateFileDiagnostics file (Key key) extras $ map (\(_,y,z) -> (y,z)) diags
+                if doDiagnostics
+                    then updateFileDiagnostics file (Key key) extras $ map (\(_,y,z) -> (y,z)) diags
+                    else forM_ diags $ \d -> liftIO $ logWarning logger $ showDiagnosticsColored [d]
                 let eq = case (bs, fmap decodeShakeValue old) of
                         (ShakeResult a, Just (ShakeResult b)) -> a == b
                         (ShakeStale a, Just (ShakeStale b)) -> a == b
