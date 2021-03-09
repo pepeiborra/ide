@@ -11,7 +11,7 @@ module Development.IDE.Core.Debouncer
 import Control.Concurrent.Extra
 import Control.Concurrent.Async
 import Control.Exception
-import Control.Monad.Extra
+import Data.Foldable (traverse_)
 import Data.Hashable
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as Map
@@ -40,18 +40,14 @@ newAsyncDebouncer = Debouncer . asyncRegisterEvent <$> newVar Map.empty
 -- to mask if required.
 asyncRegisterEvent :: (Eq k, Hashable k) => Var (HashMap k (Async ())) -> Seconds -> k -> IO () -> IO ()
 asyncRegisterEvent d 0 k fire = do
-    modifyVar_ d $ \m -> mask_ $ do
-        whenJust (Map.lookup k m) cancel
-        pure $ Map.delete k m
+    modifyVar_ d $ \m -> mask_ $ Map.alterF (\prev -> traverse_ cancel prev >> pure Nothing) k m
     fire
 asyncRegisterEvent d delay k fire = do
     a <- asyncWithUnmask $ \unmask -> unmask $ do
         sleep delay
         fire
-        modifyVar_ d (pure . Map.delete k)
-    modifyVar_ d $ \m -> mask_ $ do
-        whenJust (Map.lookup k m) cancel
-        pure $ Map.insert k a m
+        modifyVar_ d (evaluate . Map.delete k)
+    modifyVar_ d $ \m -> mask_ $ Map.alterF (\prev -> traverse_ cancel prev >> pure (Just a)) k m
 
 -- | Debouncer used in the DAML CLI compiler that emits events immediately.
 noopDebouncer :: Debouncer k
