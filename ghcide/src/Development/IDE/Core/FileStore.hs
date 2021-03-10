@@ -33,13 +33,12 @@ import Data.Maybe
 import qualified Data.Text as T
 import           Control.Monad.Extra
 import           Development.Shake
-import           Development.Shake.Classes
 import           Control.Exception
 import Data.Either.Extra
 import Data.Int (Int64)
 import Data.Time
 import System.IO.Error
-import qualified Data.ByteString.Char8 as BS
+import qualified Data.ByteString as BS
 import Development.IDE.Types.Diagnostics
 import Development.IDE.Types.Location
 import Development.IDE.Core.OfInterest (getFilesOfInterest, OfInterestVar(..))
@@ -70,6 +69,8 @@ import Language.LSP.VFS
 import Language.LSP.Types (FileEvent(FileEvent), FileChangeType (FcChanged), uriToFilePath, toNormalizedFilePath)
 import System.FilePath
 import Data.Bifunctor
+import Data.Binary (encode)
+import qualified Data.ByteString.Lazy as LBS
 
 makeVFSHandle :: IO VFSHandle
 makeVFSHandle = do
@@ -96,8 +97,16 @@ makeLSPVFSHandle lspEnv = VFSHandle
 isFileOfInterestRule :: Rules ()
 isFileOfInterestRule = defineEarlyCutoff $ RuleNoDiagnostics $ \IsFileOfInterest f -> do
     filesOfInterest <- getFilesOfInterest
-    let res = maybe NotFOI IsFOI $ f `HM.lookup` filesOfInterest
-    return (Just $ BS.pack $ show $ hash res, Just res)
+    let foi = maybe NotFOI IsFOI $ f `HM.lookup` filesOfInterest
+        fp  = summarize foi
+        res = (Just fp, Just foi)
+    return res
+    where
+    summarize NotFOI = BS.singleton 0
+    summarize (IsFOI OnDisk) = BS.singleton 1
+    summarize (IsFOI (Modified False)) = BS.singleton 2
+    summarize (IsFOI (Modified True)) = BS.singleton 3
+
 
 getModificationTimeRule :: VFSHandle -> (NormalizedFilePath -> Action Bool) -> Rules ()
 getModificationTimeRule vfs isWatched = defineEarlyCutoff $ RuleNoDiagnostics $ \(GetModificationTime_ missingFileDiags) file ->
@@ -110,24 +119,24 @@ getModificationTimeImpl :: VFSHandle
     -> Action
         (Maybe BS.ByteString, ([FileDiagnostic], Maybe FileVersion))
 getModificationTimeImpl vfs isWatched missingFileDiags file = do
-        let file' = fromNormalizedFilePath file
-        let wrap time@(l,s) = (Just $ BS.pack $ show time, ([], Just $ ModificationTime l s))
-        mbVirtual <- liftIO $ getVirtualFile vfs $ filePathToUri' file
-        case mbVirtual of
-            Just (virtualFileVersion -> ver) -> do
-                alwaysRerun
-                pure (Just $ BS.pack $ show ver, ([], Just $ VFSVersion ver))
-            Nothing -> do
-                isWF <- isWatched file
-                unless (isWF || isInterface file) alwaysRerun
-                liftIO $ fmap wrap (getModTime file')
-                    `catch` \(e :: IOException) -> do
-                        let err | isDoesNotExistError e = "File does not exist: " ++ file'
-                                | otherwise = "IO error while reading " ++ file' ++ ", " ++ displayException e
-                            diag = ideErrorText file (T.pack err)
-                        if isDoesNotExistError e && not missingFileDiags
-                            then return (Nothing, ([], Nothing))
-                            else return (Nothing, ([diag], Nothing))
+    let file' = fromNormalizedFilePath file
+    let wrap time@(l,s) = (Just $ LBS.toStrict $ encode time, ([], Just $ ModificationTime l s))
+    mbVirtual <- liftIO $ getVirtualFile vfs $ filePathToUri' file
+    case mbVirtual of
+        Just (virtualFileVersion -> ver) -> do
+            alwaysRerun
+            pure (Just $ LBS.toStrict $ encode ver, ([], Just $ VFSVersion ver))
+        Nothing -> do
+            isWF <- isWatched file
+            unless (isWF || isInterface file) alwaysRerun
+            liftIO $ fmap wrap (getModTime file')
+                `catch` \(e :: IOException) -> do
+                    let err | isDoesNotExistError e = "File does not exist: " ++ file'
+                            | otherwise = "IO error while reading " ++ file' ++ ", " ++ displayException e
+                        diag = ideErrorText file (T.pack err)
+                    if isDoesNotExistError e && not missingFileDiags
+                        then return (Nothing, ([], Nothing))
+                        else return (Nothing, ([diag], Nothing))
 
 -- | Interface files cannot be watched, since they live outside the workspace.
 --   But interface files are private, in that only HLS writes them.

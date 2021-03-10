@@ -21,6 +21,8 @@ module Development.IDE.GHC.Util(
     fingerprintToBS,
     fingerprintFromByteString,
     fingerprintFromStringBuffer,
+    fingerprintFromPut,
+    fingerprintBinary,
     -- * General utilities
     readFileUtf8,
     hDuplicateTo',
@@ -69,6 +71,9 @@ import RdrName (nameRdrName, rdrNameOcc)
 
 import Development.IDE.GHC.Compat as GHC
 import Development.IDE.Types.Location
+import qualified Data.ByteString.Lazy as LBS
+import Data.Binary.Put (runPut, Put)
+import Data.Binary (Binary (put))
 
 
 ----------------------------------------------------------------------
@@ -199,6 +204,12 @@ fingerprintFromByteString bs = do
     let (fptr, offset, len) = BS.toForeignPtr bs
     withForeignPtr fptr $ \ptr ->
         fingerprintData (ptr `plusPtr` offset) len
+
+fingerprintFromPut :: Put -> IO Fingerprint
+fingerprintFromPut = fingerprintFromByteString . LBS.toStrict . runPut
+
+fingerprintBinary :: Binary a => a -> IO Fingerprint
+fingerprintBinary = fingerprintFromPut . put
 
 -- | A slightly modified version of 'hDuplicateTo' from GHC.
 --   Importantly, it avoids the bug listed in https://gitlab.haskell.org/ghc/ghc/merge_requests/2318.

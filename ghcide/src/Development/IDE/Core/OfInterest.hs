@@ -19,7 +19,6 @@ import Data.Hashable
 import Control.DeepSeq
 import GHC.Generics
 import Data.Typeable
-import qualified Data.ByteString.UTF8 as BS
 import Control.Exception
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
@@ -39,6 +38,7 @@ import Development.IDE.Import.DependencyInformation
 import Control.Monad.Trans.Maybe
 import Control.Monad.Trans.Class
 import Development.IDE.Types.Options
+import qualified Data.ByteString.Lazy as LBS
 
 newtype OfInterestVar = OfInterestVar (Var (HashMap NormalizedFilePath FileOfInterestStatus))
 instance IsIdeGlobal OfInterestVar
@@ -59,14 +59,12 @@ ofInterestRules = do
     defineEarlyCutoff $ RuleNoDiagnostics $ \GetFilesOfInterest _file -> assert (null $ fromNormalizedFilePath _file) $ do
         alwaysRerun
         filesOfInterest <- getFilesOfInterestUntracked
-        pure (Just $ BS.fromString $ show filesOfInterest, Just filesOfInterest)
-
+        let !cutoff = LBS.toStrict $ encode $ HashMap.toList filesOfInterest
+        pure (Just cutoff, Just filesOfInterest)
 
 -- | Get the files that are open in the IDE.
 getFilesOfInterest :: Action (HashMap NormalizedFilePath FileOfInterestStatus)
 getFilesOfInterest = useNoFile_ GetFilesOfInterest
-
-
 
 ------------------------------------------------------------
 -- Exposed API
