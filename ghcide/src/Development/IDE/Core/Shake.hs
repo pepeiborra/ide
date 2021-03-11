@@ -398,9 +398,13 @@ setValues :: IdeRule k v
           -> Value v
           -> Vector FileDiagnostic
           -> IO ()
-setValues state key file val diags = modifyVar_ state $ \vals -> do
+setValues state key file val diags = do
+    new <- modifyVar state $ \vals -> do
+        let new = HMap.insert (file, Key key) (ValueWithDiagnostics (fmap toDyn val) diags) vals
+        pure (new, new)
     -- Force to make sure the old HashMap is not retained
-    evaluate $ HMap.insert (file, Key key) (ValueWithDiagnostics (fmap toDyn val) diags) vals
+    void $ evaluate new
+
 
 -- | Delete the value stored for a given ide build key
 deleteValue
@@ -409,8 +413,11 @@ deleteValue
   -> k
   -> NormalizedFilePath
   -> IO ()
-deleteValue ShakeExtras{state} key file = modifyVar_ state $ \vals ->
-    evaluate $ HMap.delete (file, Key key) vals
+deleteValue ShakeExtras{state} key file = do
+    new <- modifyVar state $ \vals -> do
+        let new = HMap.delete (file, Key key) vals
+        pure (new, new)
+    void $ evaluate new
 
 -- | We return Nothing if the rule has not run and Just Failed if it has failed to produce a value.
 getValues ::
