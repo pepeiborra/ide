@@ -139,6 +139,7 @@ import Ide.Plugin.Config
 import qualified Data.Aeson.Types as A
 import qualified Data.Binary as B
 import qualified Data.ByteString.Lazy as LBS
+import Control.Concurrent.Strict (modifyVar')
 
 -- | This is useful for rules to convert rules that can only produce errors or
 -- a result into the more general IdeResult type that supports producing
@@ -934,7 +935,7 @@ getModIfaceRule = defineEarlyCutoff $ Rule $ \GetModIface f -> do
   -- Record the linkable so we know not to unload it
   whenJust (hm_linkable . hirHomeMod =<< mhmi) $ \(LM time mod _) -> do
       compiledLinkables <- getCompiledLinkables <$> getIdeGlobalAction
-      liftIO $ modifyVar_ compiledLinkables $ \old -> pure $ extendModuleEnv old mod time
+      liftIO $ void $ modifyVar' compiledLinkables $ \old -> extendModuleEnv old mod time
   pure res
 
 getModIfaceWithoutLinkableRule :: Rules ()

@@ -16,6 +16,8 @@ import Data.Hashable
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as Map
 import System.Time.Extra
+import Control.Concurrent.Strict (modifyVarIO', modifyVar')
+import Control.Monad (void)
 
 -- | A debouncer can be used to avoid triggering many events
 -- (e.g. diagnostics) for the same key (e.g. the same file)
@@ -40,14 +42,14 @@ newAsyncDebouncer = Debouncer . asyncRegisterEvent <$> newVar Map.empty
 -- to mask if required.
 asyncRegisterEvent :: (Eq k, Hashable k) => Var (HashMap k (Async ())) -> Seconds -> k -> IO () -> IO ()
 asyncRegisterEvent d 0 k fire = do
-    modifyVar_ d $ \m -> mask_ $ Map.alterF (\prev -> traverse_ cancel prev >> pure Nothing) k m
+    void $ modifyVarIO' d $ mask_ . Map.alterF (\prev -> traverse_ cancel prev >> pure Nothing) k
     fire
 asyncRegisterEvent d delay k fire = do
     a <- asyncWithUnmask $ \unmask -> unmask $ do
         sleep delay
         fire
-        modifyVar_ d (evaluate . Map.delete k)
-    modifyVar_ d $ \m -> mask_ $ Map.alterF (\prev -> traverse_ cancel prev >> pure (Just a)) k m
+        void $ modifyVar' d (Map.delete k)
+    void $ modifyVarIO' d $ mask_ . Map.alterF (\prev -> traverse_ cancel prev >> pure (Just a)) k
 
 -- | Debouncer used in the DAML CLI compiler that emits events immediately.
 noopDebouncer :: Debouncer k

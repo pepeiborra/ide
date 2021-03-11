@@ -39,6 +39,7 @@ import Control.Monad.Trans.Maybe
 import Control.Monad.Trans.Class
 import Development.IDE.Types.Options
 import qualified Data.ByteString.Lazy as LBS
+import Control.Concurrent.Strict (modifyVar')
 
 newtype OfInterestVar = OfInterestVar (Var (HashMap NormalizedFilePath FileOfInterestStatus))
 instance IsIdeGlobal OfInterestVar
@@ -87,7 +88,7 @@ modifyFilesOfInterest
   -> IO ()
 modifyFilesOfInterest state f = do
     OfInterestVar var <- getIdeGlobalState state
-    files <- modifyVar var $ pure . dupe . f
+    files <- modifyVar' var f
     logDebug (ideLogger state) $ "Set files of interest to: " <> T.pack (show $ HashMap.toList files)
 
 -- | Typecheck all the files of interest.
@@ -114,7 +115,7 @@ kick = do
     let mguts = catMaybes results
         !exportsMap' = createExportsMapMg mguts
         !exportsMap'' = maybe mempty createExportsMap ifaces
-    liftIO $ modifyVar_ exportsMap $ evaluate . (exportsMap'' <>) . (exportsMap' <>)
+    void $ liftIO $ modifyVar' exportsMap $ (exportsMap'' <>) . (exportsMap' <>)
 
     liftIO $ progressUpdate KickCompleted
 

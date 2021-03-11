@@ -23,6 +23,7 @@ import           Development.IDE.Types.Location
 import           Development.Shake
 import           Language.LSP.Types
 import           System.FilePath (isRelative)
+import Control.Concurrent.Strict (modifyVar')
 
 -- | Lsp client relevant configuration details
 data IdeConfiguration = IdeConfiguration
@@ -73,7 +74,7 @@ modifyIdeConfiguration
   :: IdeState -> (IdeConfiguration -> IdeConfiguration) -> IO ()
 modifyIdeConfiguration ide f = do
   IdeConfigurationVar var <- getIdeGlobalState ide
-  modifyVar_ var (pure . f)
+  void $ modifyVar' var f
 
 isWorkspaceFile :: NormalizedFilePath -> Action Bool
 isWorkspaceFile file =

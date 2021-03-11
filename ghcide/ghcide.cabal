@@ -131,6 +131,7 @@ library
     include-dirs:
         include
     exposed-modules:
+        Control.Concurrent.Strict
         Development.IDE
         Development.IDE.Main
         Development.IDE.Core.Debouncer
