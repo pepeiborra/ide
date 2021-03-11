@@ -140,6 +140,8 @@ import qualified Data.Aeson.Types as A
 import qualified Data.Binary as B
 import qualified Data.ByteString.Lazy as LBS
 import Control.Concurrent.Strict (modifyVar')
+import Control.Applicative
+import Data.Traversable (for)
 
 -- | This is useful for rules to convert rules that can only produce errors or
 -- a result into the more general IdeResult type that supports producing
@@ -301,8 +303,7 @@ getParsedModuleRule :: Rules ()
 getParsedModuleRule =
   -- this rule does not have early cutoff since all its dependencies already have it
   define $ \GetParsedModule file -> do
-    ModSummaryResult{msrModSummary = ms} <- use_ GetModSummary file
-    sess <- use_ GhcSession file
+    (sess, ModSummaryResult{msrModSummary = ms}) <- liftA2 (,) (use_ GhcSession file) (use_ GetModSummary file)
     let hsc = hscEnv sess
     opt <- getIdeOptions
 
@@ -369,8 +370,7 @@ getParsedModuleWithCommentsRule =
   -- The parse diagnostics are owned by the GetParsedModule rule
   -- For this reason, this rule does not produce any diagnostics
   defineNoDiagnostics $ \GetParsedModuleWithComments file -> do
-    ModSummaryResult{msrModSummary = ms} <- use_ GetModSummary file
-    sess <- use_ GhcSession file
+    (sess, ModSummaryResult{msrModSummary = ms}) <- use_ GhcSession file `par` use_ GetModSummary file
     opt <- getIdeOptions
 
     let ms' = withoutOption Opt_Haddock $ withOption Opt_KeepRawTokenStream ms
@@ -392,10 +392,11 @@ getParsedModuleDefinition packageState opt file ms = do
 getLocatedImportsRule :: Rules ()
 getLocatedImportsRule =
     define $ \GetLocatedImports file -> do
-        ModSummaryResult{msrModSummary = ms} <- use_ GetModSummaryWithoutTimestamps file
-        targets <- useNoFile_ GetKnownTargets
+        (ModSummaryResult{msrModSummary = ms}, targets, env_eq) <-
+            liftA3 (,,) (use_ GetModSummaryWithoutTimestamps file)
+                        (useNoFile_ GetKnownTargets)
+                        (use_ GhcSession file)
         let imports = [(False, imp) | imp <- ms_textual_imps ms] ++ [(True, imp) | imp <- ms_srcimps ms]
-        env_eq <- use_ GhcSession file
         let env = hscEnvWithImportPaths env_eq
         let import_dirs = deps env_eq
         let dflags = hsc_dflags env
@@ -410,7 +411,7 @@ getLocatedImportsRule =
                 || HM.member (TargetFile nfp) targets
                 = getFileExists nfp
                 | otherwise = return False
-        (diags, imports') <- fmap unzip $ forM imports $ \(isSource, (mbPkgName, modName)) -> do
+        (diags, imports') <- fmap unzip $ for imports $ \(isSource, (mbPkgName, modName)) -> do
             diagOrImp <- locateModule dflags import_dirs (optExtensions opt) getTargetExists modName mbPkgName isSource
             case diagOrImp of
                 Left diags -> pure (diags, Just (modName, Nothing))
@@ -577,8 +578,7 @@ getDependenciesRule =
 getHieAstsRule :: Rules ()
 getHieAstsRule =
     define $ \GetHieAst f -> do
-      tmr <- use_ TypeCheck f
-      hsc <- hscEnv <$> use_ GhcSession f
+      (tmr,hsc) <- liftA2 (,) (use_ TypeCheck f) (hscEnv <$> use_ GhcSession f)
       getHieAstRuleDefinition f hsc tmr
 
 persistentHieFileRule :: Rules ()
@@ -674,8 +674,7 @@ readHieFileFromDisk hie_loc = do
 -- | Typechecks a module.
 typeCheckRule :: Rules ()
 typeCheckRule = define $ \TypeCheck file -> do
-    pm <- use_ GetParsedModule file
-    hsc  <- hscEnv <$> use_ GhcSessionDeps file
+    (pm,hsc) <- liftA2 (,) (use_ GetParsedModule file) (hscEnv <$> use_ GhcSessionDeps file)
     typeCheckRuleDefinition hsc pm
 
 knownFilesRule :: Rules ()
@@ -762,10 +761,12 @@ loadGhcSession = do
 
 ghcSessionDepsDefinition :: NormalizedFilePath -> Action (IdeResult HscEnvEq)
 ghcSessionDepsDefinition file = do
-        env <- use_ GhcSession file
+        (env, deps, ms) <-
+            liftA3 (,,)
+                   (use_ GhcSession file)
+                   (use_ GetDependencies file)
+                   (msrModSummary <$> use_ GetModSummaryWithoutTimestamps file)
         let hsc = hscEnv env
-        ms <- msrModSummary <$> use_ GetModSummaryWithoutTimestamps file
-        deps <- use_ GetDependencies file
         let tdeps = transitiveModuleDeps deps
             uses_th_qq =
               xopt LangExt.TemplateHaskell dflags || xopt LangExt.QuasiQuotes dflags
@@ -788,13 +789,14 @@ ghcSessionDepsDefinition file = do
 -- This rule also ensures that the `.hie` and `.o` (if needed) files are written out.
 getModIfaceFromDiskRule :: Rules ()
 getModIfaceFromDiskRule = defineEarlyCutoff $ Rule $ \GetModIfaceFromDisk f -> do
-  ms <- msrModSummary <$> use_ GetModSummary f
-  (diags_session, mb_session) <- ghcSessionDepsDefinition f
+  (ms, (diags_session, mb_session)) <-
+    liftA2 (,)
+           (msrModSummary <$> use_ GetModSummary f)
+           (ghcSessionDepsDefinition f)
   case mb_session of
     Nothing -> return (Nothing, (diags_session, Nothing))
     Just session -> do
-      sourceModified <- use_ IsHiFileStable f
-      linkableType <- getLinkableType f
+      ( sourceModified, linkableType ) <- liftA2 (,) (use_ IsHiFileStable f) (getLinkableType f)
       r <- loadInterface (hscEnv session) ms sourceModified linkableType (regenerateHiFile session f ms)
       case r of
         (diags, Nothing) -> return (Nothing, (diags ++ diags_session, Nothing))
@@ -872,8 +874,8 @@ isHiFileStableRule = defineEarlyCutoff $ RuleNoDiagnostics $ \IsHiFileStable f -
 getModSummaryRule :: Rules ()
 getModSummaryRule = do
     defineEarlyCutoff $ Rule $ \GetModSummary f -> do
-        session <- hscEnv <$> use_ GhcSession f
-        (modTime, mFileContent) <- getFileContents f
+        (session, (modTime, mFileContent)) <-
+            liftA2 (,) (hscEnv <$> use_ GhcSession f) (getFileContents f)
         let fp = fromNormalizedFilePath f
         modS <- liftIO $ runExceptT $
                 getModSummaryFromImports session fp modTime (textToStringBuffer <$> mFileContent)
@@ -900,9 +902,8 @@ getModSummaryRule = do
 
 generateCore :: RunSimplifier -> NormalizedFilePath -> Action (IdeResult ModGuts)
 generateCore runSimplifier file = do
-    packageState <- hscEnv <$> use_ GhcSessionDeps file
-    tm <- use_ TypeCheck file
-    setPriority priorityGenerateCore
+    (packageState, tm) <-
+        liftA2 (,) (hscEnv <$> use_ GhcSessionDeps file) (use_ TypeCheck file) <* setPriority priorityGenerateCore
     liftIO $ compileModule runSimplifier packageState (tmrModSummary tm) (tmrTypechecked tm)
 
 generateCoreRule :: Rules ()
