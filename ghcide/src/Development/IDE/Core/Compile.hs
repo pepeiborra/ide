@@ -109,7 +109,7 @@ import qualified Data.HashMap.Strict as HashMap
 import qualified Language.LSP.Types as LSP
 import qualified Language.LSP.Server as LSP
 import Control.Concurrent.STM hiding (orElse)
-import Control.Concurrent.Extra
+import qualified Control.Concurrent.Extra as Extra
 import Data.Functor
 import Data.Unique
 import GHC.Fingerprint
@@ -532,7 +532,7 @@ indexHieFile se mod_summary srcPath hash hf = atomically $ do
 
     -- Get a progress token to report progress and update it for the current file
     pre = do
-      tok <- modifyVar indexProgressToken $ fmap dupe . \case
+      tok <- Extra.modifyVar indexProgressToken $ fmap dupe . \case
         x@(Just _) -> pure x
         -- Create a token if we don't already have one
         Nothing -> do
@@ -581,7 +581,7 @@ indexHieFile se mod_summary srcPath hash hf = atomically $ do
           LSP.sendNotification (LSP.SCustomMethod "ghcide/reference/ready") $
             toJSON $ fromNormalizedFilePath srcPath
       whenJust mdone $ \done ->
-        modifyVar_ indexProgressToken $ \tok -> do
+        Extra.modifyVar_ indexProgressToken $ \tok -> do
           whenJust (lspEnv se) $ \env -> LSP.runLspT env $
             whenJust tok $ \tok ->
               LSP.sendNotification LSP.SProgress $ LSP.ProgressParams tok $

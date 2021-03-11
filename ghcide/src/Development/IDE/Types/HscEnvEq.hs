@@ -26,7 +26,7 @@ import LoadIface (loadInterface)
 import qualified Maybes
 import OpenTelemetry.Eventlog (withSpan)
 import Control.Monad.Extra (mapMaybeM, join, eitherM)
-import Control.Concurrent.Strict (newVar, modifyVar)
+import Control.Concurrent.Extra
 import Control.Concurrent.Async (Async, async, waitCatch)
 import Control.Exception (throwIO, mask, evaluate)
 import Development.IDE.GHC.Error (catchSrcErrors)

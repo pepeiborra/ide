@@ -10,7 +10,7 @@ module Development.IDE.Core.FileExists
   )
 where
 
-import           Control.Concurrent.Extra
+import           Control.Concurrent.Strict
 import           Control.Exception
 import           Control.Monad.Extra
 import qualified Data.ByteString               as BS
@@ -29,7 +29,6 @@ import           Language.LSP.Types.Capabilities
 import qualified System.Directory as Dir
 import qualified System.FilePath.Glob as Glob
 import Development.IDE.Core.RuleTypes (GetFileExists(GetFileExists))
-import Control.Concurrent.Strict (modifyVar')
 
 {- Note [File existence cache and LSP file watchers]
 Some LSP servers provide the ability to register file watches with the client, which will then notify
@@ -99,7 +98,7 @@ modifyFileExists state changes = do
   -- Masked to ensure that the previous values are flushed together with the map update
   mask $ \_ -> do
     -- update the map
-    void $ modifyVar' var $ HashMap.union changesMap
+    modifyVar_ var $ HashMap.union changesMap
     -- See Note [Invalidating file existence results]
     -- flush previous values
     mapM_ (deleteValue (shakeExtras state) GetFileExists) (HashMap.keys changesMap)

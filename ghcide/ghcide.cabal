@@ -32,6 +32,7 @@ library
     build-depends:
         aeson,
         array,
+        atomic-primops,
         async,
         base == 4.*,
         binary,

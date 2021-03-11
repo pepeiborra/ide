@@ -12,7 +12,7 @@ module Development.IDE.Core.IdeConfiguration
   )
 where
 
-import           Control.Concurrent.Extra
+import           Control.Concurrent.Strict
 import           Control.Monad
 import           Data.Hashable                  (Hashed, hashed, unhashed)
 import           Data.HashSet                   (HashSet, singleton)
@@ -23,7 +23,6 @@ import           Development.IDE.Types.Location
 import           Development.Shake
 import           Language.LSP.Types
 import           System.FilePath (isRelative)
-import Control.Concurrent.Strict (modifyVar')
 
 -- | Lsp client relevant configuration details
 data IdeConfiguration = IdeConfiguration
@@ -74,7 +73,7 @@ modifyIdeConfiguration
   :: IdeState -> (IdeConfiguration -> IdeConfiguration) -> IO ()
 modifyIdeConfiguration ide f = do
   IdeConfigurationVar var <- getIdeGlobalState ide
-  void $ modifyVar' var f
+  modifyVar_ var f
 
 isWorkspaceFile :: NormalizedFilePath -> Action Bool
 isWorkspaceFile file =

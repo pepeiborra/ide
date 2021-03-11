@@ -1,34 +1,25 @@
 module Control.Concurrent.Strict
-    (modifyVar', modifyVarIO'
+    (Var
     ,modifyVar, modifyVar_
+    ,readVar
     ,module Control.Concurrent.Extra
-    ) where
+    ,newVar) where
 
-import Control.Concurrent.Extra hiding (modifyVar, modifyVar_)
-import qualified Control.Concurrent.Extra as Extra
-import Control.Exception (evaluate)
-import Data.Tuple.Extra (dupe)
-import Control.Monad (void)
+import Control.Concurrent.Extra hiding (Var, modifyVar, modifyVar_, newVar, readVar)
+import Data.Atomics
+import Data.IORef
 
--- | Strict modification that returns the new value
-modifyVar' :: Var a -> (a -> a) -> IO a
-modifyVar' var upd = modifyVarIO' var (pure . upd)
+newtype Var a = Var {getVar :: IORef a}
 
--- | Strict modification that returns the new value
-modifyVarIO' :: Var a -> (a -> IO a) -> IO a
-modifyVarIO' var upd = do
-    res <- Extra.modifyVar var $ \v -> do
-        v' <- upd v
-        pure $ dupe v'
-    evaluate res
+newVar :: a -> IO (Var a)
+newVar = fmap Var . newIORef
 
-modifyVar :: Var a -> (a -> IO (a, b)) -> IO b
-modifyVar var upd = do
-    (new, res) <- Extra.modifyVar var $ \old -> do
-        (new,res) <- upd old
-        return (new, (new, res))
-    void $ evaluate new
-    return res
+readVar :: Var a -> IO a
+readVar = readIORef . getVar
 
-modifyVar_ :: Var a -> (a -> IO a) -> IO ()
-modifyVar_ var upd = void $ modifyVarIO' var upd
+modifyVar_ :: Var a -> (a -> a) -> IO ()
+modifyVar_ (Var var) = atomicModifyIORefCAS_ var
+
+modifyVar :: Var a -> (a -> (a, b)) -> IO b
+modifyVar (Var var) = atomicModifyIORefCAS var
+

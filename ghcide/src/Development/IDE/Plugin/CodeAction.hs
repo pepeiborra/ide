@@ -51,7 +51,7 @@ import Control.Applicative ((<|>))
 import Safe (atMay)
 import Bag (isEmptyBag)
 import qualified Data.HashSet as Set
-import Control.Concurrent.Extra (readVar)
+import Control.Concurrent.Strict(readVar)
 import Development.IDE.GHC.Util (printRdrName, prettyPrint)
 import Ide.PluginUtils (subRange)
 import Ide.Types

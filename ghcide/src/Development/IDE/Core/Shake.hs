@@ -74,6 +74,7 @@ module Development.IDE.Core.Shake(
     addPersistentRule
     ) where
 
+import qualified Control.Concurrent.Extra as Extra
 import           Control.Concurrent.Strict
 import           Development.Shake hiding (ShakeValue, doesFileExist, Info)
 import           Development.Shake.Database
@@ -152,7 +153,7 @@ data HieDbWriter
   { indexQueue :: IndexQueue
   , indexPending :: TVar (HMap.HashMap NormalizedFilePath Fingerprint) -- ^ Avoid unnecessary/out of date indexing
   , indexCompleted :: TVar Int -- ^ to report progress
-  , indexProgressToken :: Var (Maybe LSP.ProgressToken)
+  , indexProgressToken :: Extra.Var (Maybe LSP.ProgressToken)
   -- ^ This is a Var instead of a TVar since we need to do IO to initialise/update, so we need a lock
   }
 
@@ -229,7 +230,7 @@ getShakeExtrasRules = do
 addPersistentRule :: IdeRule k v => k -> (NormalizedFilePath -> IdeAction (Maybe (v,PositionDelta,TextDocumentVersion))) -> Rules ()
 addPersistentRule k getVal = do
   ShakeExtras{persistentKeys} <- getShakeExtrasRules
-  void $ liftIO $ modifyVar' persistentKeys $ HMap.insert (Key k) (fmap (fmap (first3 toDyn)) . getVal)
+  void $ liftIO $ modifyVar_ persistentKeys $ HMap.insert (Key k) (fmap (fmap (first3 toDyn)) . getVal)
 
 class Typeable a => IsIdeGlobal a where
 
@@ -253,9 +254,9 @@ addIdeGlobal x = do
 
 addIdeGlobalExtras :: IsIdeGlobal a => ShakeExtras -> a -> IO ()
 addIdeGlobalExtras ShakeExtras{globals} x@(typeOf -> ty) =
-    void $ liftIO $ modifyVarIO' globals $ \mp -> case HMap.lookup ty mp of
-        Just _ -> errorIO $ "Internal error, addIdeGlobalExtras, got the same type twice for " ++ show ty
-        Nothing -> return $! HMap.insert ty (toDyn x) mp
+    liftIO $ modifyVar_ globals $ \mp -> case HMap.lookup ty mp of
+        Just _ -> error $ "Internal error, addIdeGlobalExtras, got the same type twice for " ++ show ty
+        Nothing -> HMap.insert ty (toDyn x) mp
 
 
 getIdeGlobalExtras :: forall a . IsIdeGlobal a => ShakeExtras -> IO a
@@ -307,10 +308,10 @@ lastValueIO s@ShakeExtras{positionMapping,persistentKeys,state} k file = do
             MaybeT $ pure $ (,del,ver) <$> fromDynamic dv
           case mv of
             Nothing -> do
-                void $ modifyVar' state $ HMap.alter (alterValue $ Failed True) (file,Key k)
+                modifyVar_ state $ HMap.alter (alterValue $ Failed True) (file,Key k)
                 return Nothing
             Just (v,del,ver) -> do
-                void $ modifyVar' state $ HMap.alter (alterValue $ Stale (Just del) ver (toDyn v)) (file,Key k)
+                modifyVar_ state $ HMap.alter (alterValue $ Stale (Just del) ver (toDyn v)) (file,Key k)
                 return $ Just (v,addDelta del $ mappingForVersion allMappings file ver)
 
         -- We got a new stale value from the persistent rule, insert it in the map without affecting diagnostics
@@ -387,7 +388,7 @@ shakeDatabaseProfileIO mbProfileDir = do
     profileCounter <- newVar (0::Int)
     return $ \shakeDb ->
         for mbProfileDir $ \dir -> do
-                count <- modifyVar profileCounter $ \x -> let !y = x+1 in return (y,y)
+                count <- modifyVar profileCounter $ \x -> let !y = x+1 in (y,y)
                 let file = "ide-" ++ profileStartTime ++ "-" ++ takeEnd 5 ("0000" ++ show count) <.> "html"
                 shakeProfileDatabase shakeDb $ dir </> file
                 return (dir </> file)
@@ -400,7 +401,7 @@ setValues :: IdeRule k v
           -> Vector FileDiagnostic
           -> IO ()
 setValues state key file val diags =
-    void $ modifyVar' state $ HMap.insert (file, Key key) (ValueWithDiagnostics (fmap toDyn val) diags)
+    modifyVar_ state $ HMap.insert (file, Key key) (ValueWithDiagnostics (fmap toDyn val) diags)
 
 
 -- | Delete the value stored for a given ide build key
@@ -410,7 +411,7 @@ deleteValue
   -> k
   -> NormalizedFilePath
   -> IO ()
-deleteValue ShakeExtras{state} key file = void $ modifyVar' state $ HMap.delete (file, Key key)
+deleteValue ShakeExtras{state} key file = modifyVar_ state $ HMap.delete (file, Key key)
 
 -- | We return Nothing if the rule has not run and Just Failed if it has failed to produce a value.
 getValues ::
@@ -480,7 +481,7 @@ shakeOpen lspEnv logger debouncer
         let progressUpdate = atomically . writeTVar mostRecentProgressEvent
         indexPending <- newTVarIO HMap.empty
         indexCompleted <- newTVarIO 0
-        indexProgressToken <- newVar Nothing
+        indexProgressToken <- Extra.newVar Nothing
         let hiedbWriter = HieDbWriter{..}
         progressAsync <- async $
             when reportProgress $
@@ -764,15 +765,15 @@ garbageCollect :: (NormalizedFilePath -> Bool) -> Action ()
 garbageCollect keep = do
     ShakeExtras{state, diagnostics,hiddenDiagnostics,publishedDiagnostics,positionMapping} <- getShakeExtras
     liftIO $
-        do newState <- modifyVar' state $ HMap.filterWithKey (\(file, _) _ -> keep file)
-           void $ modifyVar' diagnostics $ filterDiagnostics keep
-           void $ modifyVar' hiddenDiagnostics $ filterDiagnostics keep
-           void $ modifyVar' publishedDiagnostics $ HMap.filterWithKey (\uri _ -> keep (fromUri uri))
+        do newState <- modifyVar state $ dupe . HMap.filterWithKey (\(file, _) _ -> keep file)
+           modifyVar_ diagnostics $ filterDiagnostics keep
+           modifyVar_ hiddenDiagnostics $ filterDiagnostics keep
+           modifyVar_ publishedDiagnostics $ HMap.filterWithKey (\uri _ -> keep (fromUri uri))
            let versionsForFile =
                    HMap.fromListWith Set.union $
                    mapMaybe (\((file, _key), ValueWithDiagnostics v _) -> (filePathToUri' file,) . Set.singleton <$> valueVersion v) $
                    HMap.toList newState
-           void $ modifyVar' positionMapping $ filterVersionMap versionsForFile
+           modifyVar_ positionMapping $ filterVersionMap versionsForFile
 
 -- | Define a new Rule without early cutoff
 define
@@ -973,7 +974,7 @@ defineEarlyCutoff' doDiagnostics key file old mode action = do
         -- This functions are deliberately eta-expanded to avoid space leaks.
         -- Do not remove the eta-expansion without profiling a session with at
         -- least 1000 modifications.
-        where f shift = void $ modifyVar' var $ HMap.insertWith (\_ x -> shift x) file (shift 0)
+        where f shift = modifyVar_ var $ HMap.insertWith (\_ x -> shift x) file (shift 0)
 
 isSuccess :: RunResult (A v) -> Bool
 isSuccess (RunResult _ _ (A Failed{})) = False
@@ -1074,12 +1075,12 @@ updateFileDiagnostics fp k ShakeExtras{logger, diagnostics, hiddenDiagnostics, p
         -- published. Otherwise, we might never publish certain diagnostics if
         -- an exception strikes between modifyVar but before
         -- publishDiagnosticsNotification.
-        newDiags <- modifyVar diagnostics $ pure . update (map snd currentShown)
-        _ <- modifyVar hiddenDiagnostics $  pure . update (map snd currentHidden)
+        newDiags <- modifyVar diagnostics $ update (map snd currentShown)
+        _ <- modifyVar hiddenDiagnostics $  update (map snd currentHidden)
         let uri = filePathToUri' fp
         let delay = if null newDiags then 0.1 else 0
         registerEvent debouncer delay uri $ do
-             join $ mask_ $ modifyVar publishedDiagnostics $ \published -> do
+             join $ mask_ $ modifyVar publishedDiagnostics $ \published ->
                  let lastPublish = HMap.lookupDefault [] uri published
                      !published' = HMap.insert uri newDiags published
                      action = when (lastPublish /= newDiags) $ case lspEnv of
@@ -1088,7 +1089,7 @@ updateFileDiagnostics fp k ShakeExtras{logger, diagnostics, hiddenDiagnostics, p
                         Just env -> LSP.runLspT env $
                             LSP.sendNotification LSP.STextDocumentPublishDiagnostics $
                             LSP.PublishDiagnosticsParams (fromNormalizedUri uri) ver (List newDiags)
-                 return (published', action)
+                 in (published', action)
 
 newtype Priority = Priority Double
 
@@ -1161,6 +1162,6 @@ updatePositionMapping IdeState{shakeExtras = ShakeExtras{positionMapping}} Versi
                 Map.mapAccumRWithKey (\acc _k (delta, _) -> let new = addDelta delta acc in (new, (delta, acc)))
                   zeroMapping
                   (Map.insert _version (shared_change, zeroMapping) mappingForUri)
-        pure $ HMap.insert uri updatedMapping allMappings
+        HMap.insert uri updatedMapping allMappings
   where
     shared_change = mkDelta changes

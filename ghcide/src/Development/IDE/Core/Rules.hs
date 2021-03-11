@@ -128,7 +128,7 @@ import qualified Data.HashSet as HashSet
 import qualified Data.HashMap.Strict as HM
 import TcRnMonad (tcg_dependent_files)
 import Data.IORef
-import Control.Concurrent.Extra
+import Control.Concurrent.Strict
 import Module
 import qualified Data.Rope.UTF16 as Rope
 import GHC.IO.Encoding
@@ -139,7 +139,6 @@ import Ide.Plugin.Config
 import qualified Data.Aeson.Types as A
 import qualified Data.Binary as B
 import qualified Data.ByteString.Lazy as LBS
-import Control.Concurrent.Strict (modifyVar')
 import Control.Applicative
 import Data.Traversable (for)
 
@@ -936,7 +935,7 @@ getModIfaceRule = defineEarlyCutoff $ Rule $ \GetModIface f -> do
   -- Record the linkable so we know not to unload it
   whenJust (hm_linkable . hirHomeMod =<< mhmi) $ \(LM time mod _) -> do
       compiledLinkables <- getCompiledLinkables <$> getIdeGlobalAction
-      liftIO $ void $ modifyVar' compiledLinkables $ \old -> extendModuleEnv old mod time
+      liftIO $ modifyVar_ compiledLinkables $ \old -> extendModuleEnv old mod time
   pure res
 
 getModIfaceWithoutLinkableRule :: Rules ()

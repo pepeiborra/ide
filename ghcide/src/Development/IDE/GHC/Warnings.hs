@@ -31,7 +31,7 @@ withWarnings diagSource action = do
   let newAction :: DynFlags -> WarnReason -> Severity -> SrcSpan -> PprStyle -> SDoc -> IO ()
       newAction dynFlags wr _ loc style msg = do
         let wr_d = map ((wr,) . third3 (attachReason wr)) $ diagFromErrMsg diagSource dynFlags $ mkWarnMsg dynFlags loc (queryQual style) msg
-        modifyVar_ warnings $ return . (wr_d:)
+        modifyVar_ warnings (wr_d:)
   res <- action $ \x -> x{ms_hspp_opts = (ms_hspp_opts x){log_action = newAction}}
   warns <- readVar warnings
   return (reverse $ concat warns, res)

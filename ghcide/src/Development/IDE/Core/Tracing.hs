@@ -10,7 +10,7 @@ module Development.IDE.Core.Tracing
 where
 
 import           Control.Concurrent.Async       (Async, async)
-import           Control.Concurrent.Extra       (Var, modifyVar_, newVar,
+import           Control.Concurrent.Strict      (Var, modifyVar_, newVar,
                                                  readVar, threadDelay)
 import           Control.Exception              (evaluate)
 import           Control.Exception.Safe         (catch, SomeException)
@@ -162,7 +162,7 @@ getInstrumentCached = do
           case mb_inst of
             Nothing -> do
                 instrument <- mkValueObserver (fromString (show k ++ " size_bytes"))
-                modifyVar_ instrumentMap (return . HMap.insert k instrument)
+                modifyVar_ instrumentMap (HMap.insert k instrument)
                 return $ observe instrument
             Just v -> return $ observe v
     return $ maybe (return $ observe mapBytesInstrument) instrumentFor

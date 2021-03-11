@@ -24,7 +24,7 @@ module Development.IDE.Core.FileStore(
 
 import Development.IDE.GHC.Orphans()
 import           Development.IDE.Core.Shake
-import Control.Concurrent.Extra
+import Control.Concurrent.Strict
 import Control.Concurrent.STM (atomically)
 import Control.Concurrent.STM.TQueue (writeTQueue)
 import qualified Data.Map.Strict as Map
@@ -71,7 +71,6 @@ import System.FilePath
 import Data.Bifunctor
 import Data.Binary (encode)
 import qualified Data.ByteString.Lazy as LBS
-import Control.Concurrent.Strict (modifyVar')
 
 makeVFSHandle :: IO VFSHandle
 makeVFSHandle = do
@@ -81,7 +80,7 @@ makeVFSHandle = do
               (_nextVersion, vfs) <- readVar vfsVar
               pure $ Map.lookup uri vfs
         , setVirtualFileContents = Just $ \uri content ->
-              void $ modifyVar' vfsVar $ \(nextVersion, vfs) -> (nextVersion + 1, ) $
+              modifyVar_ vfsVar $ \(nextVersion, vfs) -> (nextVersion + 1, ) $
                   case content of
                     Nothing -> Map.delete uri vfs
                     -- The second version number is only used in persistFileVFS which we do not use so we set it to 0.

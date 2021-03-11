@@ -1,5 +1,5 @@
 module Development.IDE.Main (Arguments(..), defaultMain) where
-import Control.Concurrent.Extra (readVar)
+import Control.Concurrent.Strict(readVar)
 import Control.Exception.Safe (
     Exception (displayException),
     catchAny,
