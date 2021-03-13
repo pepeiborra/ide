@@ -903,9 +903,9 @@ defineEarlyCutoff
     :: IdeRule k v
     => RuleBody k v
     -> Rules ()
-defineEarlyCutoff (Rule op) = addBuiltinRule noLint noIdentity $ \(Q (key, file)) (old :: Maybe BS.ByteString) mode -> otTracedAction key file isSuccess $ do
+defineEarlyCutoff (Rule op) = addBuiltinRuleStaged noLint noIdentity $ \(Q (key, file)) (old :: Maybe BS.ByteString) mode ->
     defineEarlyCutoff' True key file old mode $ op key file
-defineEarlyCutoff (RuleNoDiagnostics op) = addBuiltinRule noLint noIdentity $ \(Q (key, file)) (old :: Maybe BS.ByteString) mode -> otTracedAction key file isSuccess $ do
+defineEarlyCutoff (RuleNoDiagnostics op) = addBuiltinRuleStaged noLint noIdentity $ \(Q (key, file)) (old :: Maybe BS.ByteString) mode -> do
     defineEarlyCutoff' False key file old mode $ second (mempty,) <$> op key file
 
 defineEarlyCutoff'
@@ -916,13 +916,13 @@ defineEarlyCutoff'
     -> Maybe BS.ByteString
     -> RunMode
     -> Action (Maybe BS.ByteString, IdeResult v)
-    -> Action (RunResult (A (RuleResult k)))
+    -> Action (BuiltinRunResult (A(RuleResult k)))
 defineEarlyCutoff' doDiagnostics key file old mode action = do
     extras@ShakeExtras{state, inProgress, logger} <- getShakeExtras
     options <- getIdeOptions
     (if optSkipProgress options key then id else withProgressVar inProgress file) $ do
         val <- case old of
-            Just old | mode == RunDependenciesSame -> do
+            Just _ | mode == RunDependenciesSame -> do
                 v <- liftIO $ getValues state key file
                 case v of
                     -- No changes in the dependencies and we have
@@ -930,12 +930,12 @@ defineEarlyCutoff' doDiagnostics key file old mode action = do
                     Just (v, diags) -> do
                         when doDiagnostics $
                             updateFileDiagnostics file (Key key) extras $ map (\(_,y,z) -> (y,z)) $ Vector.toList diags
-                        return $ Just $ RunResult ChangedNothing old $ A v
+                        return $ Just $ A v
                     _ -> return Nothing
             _ -> return Nothing
         case val of
-            Just res -> return res
-            Nothing -> do
+            Just res -> return $ BuiltinRunChangedNothing res
+            Nothing -> return $ BuiltinRunMore $ do
                 (bs, (diags, res)) <- actionCatch
                     (do v <- action; liftIO $ evaluate $ force v) $
                     \(e :: SomeException) -> do
