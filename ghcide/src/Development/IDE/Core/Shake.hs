@@ -921,10 +921,16 @@ defineEarlyCutoff
     :: IdeRule k v
     => RuleBody k v
     -> Rules ()
-defineEarlyCutoff (Rule op) = addBuiltinRuleStaged noLint noIdentity $ \(Q (key, file)) (old :: Maybe BS.ByteString) mode ->
-    defineEarlyCutoff' True key file old mode $ op key file
-defineEarlyCutoff (RuleNoDiagnostics op) = addBuiltinRuleStaged noLint noIdentity $ \(Q (key, file)) (old :: Maybe BS.ByteString) mode -> do
-    defineEarlyCutoff' False key file old mode $ second (mempty,) <$> op key file
+defineEarlyCutoff (Rule op) = do
+    extras <- getShakeExtrasRules
+    options <- liftIO $ getIdeOptionsIO extras
+    addBuiltinRuleStaged noLint noIdentity $ \(Q (key, file)) (old :: Maybe BS.ByteString) mode ->
+        defineEarlyCutoff' True key file old mode extras options $ op key file
+defineEarlyCutoff (RuleNoDiagnostics op) = do
+    extras <- getShakeExtrasRules
+    options <- liftIO $ getIdeOptionsIO extras
+    addBuiltinRuleStaged noLint noIdentity $ \(Q (key, file)) (old :: Maybe BS.ByteString) mode ->
+        defineEarlyCutoff' False key file old mode extras options $ second (mempty,) <$> op key file
 
 defineEarlyCutoff'
     :: IdeRule k v
@@ -933,15 +939,15 @@ defineEarlyCutoff'
     -> NormalizedFilePath
     -> Maybe BS.ByteString
     -> RunMode
+    -> ShakeExtras
+    -> IdeOptions
     -> Action (Maybe BS.ByteString, IdeResult v)
-    -> Action (BuiltinRunResult (A(RuleResult k)))
-defineEarlyCutoff' doDiagnostics key file old mode action = do
-    extras@ShakeExtras{state, inProgress, logger} <- getShakeExtras
-    options <- getIdeOptions
+    -> IO (BuiltinRunResult (A(RuleResult k)))
+defineEarlyCutoff' doDiagnostics key file old mode extras@ShakeExtras{..} options action = do
     (if optSkipProgress options key then id else withProgressVar inProgress file) $ do
         val <- case old of
             Just _ | mode == RunDependenciesSame -> do
-                v <- liftIO $ getValues state key file
+                v <- getValues state key file
                 case v of
                     -- No changes in the dependencies and we have
                     -- an existing result.
@@ -953,7 +959,7 @@ defineEarlyCutoff' doDiagnostics key file old mode action = do
             _ -> return Nothing
         case val of
             Just res -> return $ BuiltinRunChangedNothing res
-            Nothing -> return $ BuiltinRunMore $ do
+            Nothing -> return $ BuiltinRunMore $ otTracedAction key file isSuccess $ do
                 (bs, (diags, res)) <- actionCatch
                     (do v <- action; liftIO $ evaluate $ force v) $
                     \(e :: SomeException) -> pure (Nothing, ([ideErrorText file $ T.pack $ show e | not $ isBadDependency e],Nothing))
@@ -987,8 +993,8 @@ defineEarlyCutoff' doDiagnostics key file old mode action = do
                     A res
     where
 
-        withProgressVar :: (Eq a, Hashable a) => Var (HMap.HashMap a Int) -> a -> Action b -> Action b
-        withProgressVar var file = actionBracket (f succ) (const $ f pred) . const
+        withProgressVar :: (Eq a, Hashable a) => Var (HMap.HashMap a Int) -> a -> IO b -> IO b
+        withProgressVar var file = bracket (f succ) (const $ f pred) . const
             -- This functions are deliberately eta-expanded to avoid space leaks.
             -- Do not remove the eta-expansion without profiling a session with at
             -- least 1000 modifications.
