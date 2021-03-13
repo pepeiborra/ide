@@ -80,13 +80,13 @@ newtype Q k = Q (k, NormalizedFilePath)
     deriving newtype (Eq, Hashable, NFData)
 
 instance Binary k => Binary (Q k) where
-    put (Q (k, fp)) = put (k, fp)
+    put (Q (k, NormalizedFilePath (NormalizedUri h uri) fp)) = put (k, h, uri, fp)
     get = do
-        (k, fp) <- get
+        (k, h, uri, fp) <- get
         -- The `get` implementation of NormalizedFilePath
         -- does not handle empty file paths so we
         -- need to handle this ourselves here.
-        pure (Q (k, toNormalizedFilePath' fp))
+        pure (Q (k, NormalizedFilePath (NormalizedUri h uri) fp))
 
 instance Show k => Show (Q k) where
     show (Q (k, file)) = show k ++ "; " ++ fromNormalizedFilePath file
