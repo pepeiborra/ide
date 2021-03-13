@@ -38,7 +38,7 @@ import Development.IDE.Core.Rules (
 import Development.IDE.Core.Service (initialise, runAction)
 import Development.IDE.Core.Shake (
     IdeState (shakeExtras),
-    ShakeExtras (state),
+    ShakeExtras (state, restartShakeSession),
     uses,
  )
 import Development.IDE.Core.Tracing (measureMemory)
@@ -182,15 +182,21 @@ defaultMain Arguments{..} = do
             ide <- initialise rules Nothing argsLogger debouncer options vfs hiedb hieChan
 
             putStrLn "\nStep 4/4: Type checking the files"
-            setFilesOfInterest ide $ HashMap.fromList $ map ((,OnDisk) . toNormalizedFilePath') files
-            results <- runAction "User TypeCheck" ide $ uses TypeCheck (map toNormalizedFilePath' files)
-            _results <- runAction "GetHie" ide $ uses GetHieAst (map toNormalizedFilePath' files)
-            _results <- runAction "GenerateCore" ide $ uses GenerateCore (map toNormalizedFilePath' files)
+            let ff = map toNormalizedFilePath' files
+            setFilesOfInterest ide $ HashMap.fromList $ map (,OnDisk) ff
+            results <- runAction "User TypeCheck" ide $ uses TypeCheck ff
+            _results <- runAction "GetHie" ide $ uses GetHieAst ff
+            _results <- runAction "GenerateCore" ide $ uses GenerateCore ff
             let (worked, failed) = partition fst $ zip (map isJust results) files
             when (failed /= []) $
                 putStr $ unlines $ "Files that failed:" : map ((++) " * " . snd) failed
 
             let nfiles xs = let n = length xs in if n == 1 then "1 file" else show n ++ " files"
+
+            let extras = shakeExtras ide
+            restartShakeSession extras []
+            _ <- runAction "Second typecheck" ide $ uses TypeCheck ff
+
             putStrLn $ "\nCompleted (" ++ nfiles worked ++ " worked, " ++ nfiles failed ++ " failed)"
 
             when argsOTMemoryProfiling $ do
