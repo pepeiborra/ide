@@ -36,6 +36,8 @@ import           Development.IDE.Core.FileStore        (resetFileStore,
                                                         setSomethingModified,
                                                         typecheckParents)
 import           Development.IDE.Core.OfInterest
+import           Development.IDE.Core.RuleTypes        (GetClientSettings (GetClientSettings))
+import           Development.IDE.Types.Shake           (toKey)
 import           Ide.Plugin.Config                     (CheckParents (CheckOnClose))
 
 
@@ -51,7 +53,7 @@ setHandlersNotifications = mconcat
           -- We don't know if the file actually exists, or if the contents match those on disk
           -- For example, vscode restores previously unsaved contents on open
           modifyFilesOfInterest ide (M.insert file Modified{firstOpen=True})
-          setFileModified ide False file
+          setFileModified ide False True file
           logDebug (ideLogger ide) $ "Opened text document: " <> getUri _uri
 
   , notificationHandler LSP.STextDocumentDidChange $
@@ -59,14 +61,14 @@ setHandlersNotifications = mconcat
         updatePositionMapping ide identifier changes
         whenUriFile _uri $ \file -> do
           modifyFilesOfInterest ide (M.insert file Modified{firstOpen=False})
-          setFileModified ide False file
+          setFileModified ide False False file
         logDebug (ideLogger ide) $ "Modified text document: " <> getUri _uri
 
   , notificationHandler LSP.STextDocumentDidSave $
       \ide (DidSaveTextDocumentParams TextDocumentIdentifier{_uri} _) -> liftIO $ do
         whenUriFile _uri $ \file -> do
             modifyFilesOfInterest ide (M.insert file OnDisk)
-            setFileModified ide True file
+            setFileModified ide True False file
         logDebug (ideLogger ide) $ "Saved text document: " <> getUri _uri
 
   , notificationHandler LSP.STextDocumentDidClose $
@@ -84,9 +86,9 @@ setHandlersNotifications = mconcat
         -- what we do with them
         let msg = Text.pack $ show fileEvents
         logDebug (ideLogger ide) $ "Watched file events: " <> msg
-        modifyFileExists ide fileEvents
+        keys <- modifyFileExists ide fileEvents
         resetFileStore ide fileEvents
-        setSomethingModified ide
+        setSomethingModified ide keys
 
   , notificationHandler LSP.SWorkspaceDidChangeWorkspaceFolders $
       \ide (DidChangeWorkspaceFoldersParams events) -> liftIO $ do
@@ -101,7 +103,7 @@ setHandlersNotifications = mconcat
         let msg = Text.pack $ show cfg
         logDebug (ideLogger ide) $ "Configuration changed: " <> msg
         modifyClientSettings ide (const $ Just cfg)
-        setSomethingModified ide
+        setSomethingModified ide [toKey GetClientSettings emptyFilePath ]
 
   , notificationHandler LSP.SInitialized $ \ide _ -> do
       clientCapabilities <- LSP.getClientCapabilities

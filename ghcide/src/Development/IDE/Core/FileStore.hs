@@ -67,6 +67,7 @@ import qualified Development.IDE.Types.Logger                 as L
 
 import qualified Data.Binary                                  as B
 import qualified Data.ByteString.Lazy                         as LBS
+import           Development.IDE.Types.Shake                  (Key, toKey)
 import           Language.LSP.Server                          hiding
                                                               (getVirtualFile)
 import qualified Language.LSP.Server                          as LSP
@@ -267,9 +268,10 @@ fileStoreRules vfs isWatched = do
 -- with what changes.
 setFileModified :: IdeState
                 -> Bool -- ^ Was the file saved?
+                -> Bool -- ^ Was the FOI set changed ?
                 -> NormalizedFilePath
                 -> IO ()
-setFileModified state saved nfp = do
+setFileModified state saved foisChanged nfp = do
     ideOptions <- getIdeOptionsIO $ shakeExtras state
     doCheckParents <- optCheckParents ideOptions
     let checkParents = case doCheckParents of
@@ -279,7 +281,9 @@ setFileModified state saved nfp = do
     VFSHandle{..} <- getIdeGlobalState state
     when (isJust setVirtualFileContents) $
         fail "setFileModified can't be called on this type of VFSHandle"
-    shakeRestart state []
+    let keysChanged =  [toKey GetFilesOfInterest emptyFilePath | foisChanged]
+                    <> [toKey (GetModificationTime_ b) nfp | b <- [True, False]]
+    shakeRestart state (Just keysChanged)  []
     when checkParents $
       typecheckParents state nfp
 
@@ -302,11 +306,11 @@ typecheckParentsAction nfp = do
 -- | Note that some buffer somewhere has been modified, but don't say what.
 --   Only valid if the virtual file system was initialised by LSP, as that
 --   independently tracks which files are modified.
-setSomethingModified :: IdeState -> IO ()
-setSomethingModified state = do
+setSomethingModified :: IdeState -> [Key] -> IO ()
+setSomethingModified state keys = do
     VFSHandle{..} <- getIdeGlobalState state
     when (isJust setVirtualFileContents) $
         fail "setSomethingModified can't be called on this type of VFSHandle"
     -- Update database to remove any files that might have been renamed/deleted
     atomically $ writeTQueue (indexQueue $ hiedbWriter $ shakeExtras state) deleteMissingRealFiles
-    void $ shakeRestart state []
+    void $ shakeRestart state (Just keys) []

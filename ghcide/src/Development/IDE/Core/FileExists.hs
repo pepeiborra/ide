@@ -23,6 +23,7 @@ import           Development.IDE.Core.RuleTypes
 import           Development.IDE.Core.Shake
 import           Development.IDE.Types.Location
 import           Development.IDE.Types.Options
+import           Development.IDE.Types.Shake           (Key, toKey)
 import           Development.Shake
 import           Language.LSP.Server                   hiding (getVirtualFile)
 import           Language.LSP.Types
@@ -86,7 +87,7 @@ getFileExistsMapUntracked = do
   liftIO $ readVar v
 
 -- | Modify the global store of file exists.
-modifyFileExists :: IdeState -> [FileEvent] -> IO ()
+modifyFileExists :: IdeState -> [FileEvent] -> IO [Key]
 modifyFileExists state changes = do
   FileExistsMapVar var <- getIdeGlobalState state
   changesMap           <- evaluate $ HashMap.fromList $
@@ -102,6 +103,8 @@ modifyFileExists state changes = do
     -- See Note [Invalidating file existence results]
     -- flush previous values
     mapM_ (deleteValue (shakeExtras state) GetFileExists) (HashMap.keys changesMap)
+
+  return [toKey GetFileExists f | f <- HashMap.keys changesMap]
 
 fromChange :: FileChangeType -> Maybe Bool
 fromChange FcCreated = Just True

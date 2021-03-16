@@ -84,6 +84,7 @@ import           Packages
 import           Control.Concurrent.STM               (atomically)
 import           Control.Concurrent.STM.TQueue
 import           Database.SQLite.Simple
+import           Development.IDE.Types.Shake          (toNoFileKey)
 import           HIE.Bios.Cradle                      (yamlConfig)
 import           HieDb.Create
 import           HieDb.Types
@@ -373,7 +374,7 @@ loadSessionWithOptions SessionLoadingOptions{..} dir = do
 
           -- Invalidate all the existing GhcSession build nodes by restarting the Shake session
           invalidateShakeCache
-          restartShakeSession []
+          restartShakeSession (Just [toNoFileKey GetKnownTargets, toNoFileKey GhcSessionIO]) []
 
           -- Typecheck all files in the project on startup
           checkProject <- getCheckProject

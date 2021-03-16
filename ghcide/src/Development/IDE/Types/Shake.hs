@@ -12,7 +12,7 @@ module Development.IDE.Types.Shake
     ShakeValue(..),
     currentValue,
     isBadDependency,
-  toShakeValue,encodeShakeValue,decodeShakeValue)
+  toShakeValue,encodeShakeValue,decodeShakeValue,toKey,toNoFileKey)
 where
 
 import           Control.DeepSeq
@@ -28,6 +28,7 @@ import           Development.IDE.Types.Diagnostics
 import           Development.IDE.Types.Location
 import           Development.Shake                    (RuleResult,
                                                        ShakeException (shakeExceptionInner))
+import qualified Development.Shake                    as Shake
 import           Development.Shake.Classes
 import           GHC.Generics
 import           Language.LSP.Types
@@ -54,7 +55,7 @@ data ValueWithDiagnostics
 type Values = HashMap (NormalizedFilePath, Key) ValueWithDiagnostics
 
 -- | Key type
-data Key = forall k . (Typeable k, Hashable k, Eq k, Show k) => Key k
+data Key = forall k . (Typeable k, Hashable k, Eq k, NFData k, Show k) => Key k
 
 instance Show Key where
   show (Key k) = show k
@@ -64,7 +65,14 @@ instance Eq Key where
                      | otherwise = False
 
 instance Hashable Key where
-    hashWithSalt salt (Key key) = hashWithSalt salt (typeOf key, key)
+    hashWithSalt salt (Key key) = hashWithSalt salt key
+
+instance Binary Key where
+    get = error "not really"
+    put _ = error "not really"
+
+instance NFData Key where
+    rnf (Key k) = rnf k
 
 -- | When we depend on something that reported an error, and we fail as a direct result, throw BadDependency
 --   which short-circuits the rest of the action
@@ -76,6 +84,13 @@ isBadDependency x
     | Just (x :: ShakeException) <- fromException x = isBadDependency $ shakeExceptionInner x
     | Just (_ :: BadDependency) <- fromException x = True
     | otherwise = False
+
+
+toKey :: Shake.ShakeValue k => k -> NormalizedFilePath -> Key
+toKey = (Key.) . curry Q
+
+toNoFileKey :: (Show k, Typeable k, Eq k, Hashable k, Binary k, NFData k) => k -> Key
+toNoFileKey k = toKey k emptyFilePath
 
 newtype Q k = Q (k, NormalizedFilePath)
     deriving newtype (Eq, Hashable, NFData)

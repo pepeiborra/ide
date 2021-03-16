@@ -42,6 +42,7 @@ module Development.IDE.Core.Shake(
     define, defineNoDiagnostics,
     defineEarlyCutoff,
     defineOnDisk, needOnDisk, needOnDisks,
+    defineNoFile, defineEarlyCutOffNoFile,
     getDiagnostics,
     mRunLspT, mRunLspTCallback,
     getHiddenDiagnostics,
@@ -190,7 +191,10 @@ data ShakeExtras = ShakeExtras
     -- ^ Whether to enable additional lsp messages used by the test suite for checking invariants
     ,session :: MVar ShakeSession
     -- ^ Used in the GhcSession rule to forcefully restart the session after adding a new component
-    ,restartShakeSession :: [DelayedAction ()] -> IO ()
+    ,restartShakeSession
+        :: Maybe [Key]         -- keys changed (or Nothing for ALL)
+        -> [DelayedAction ()]
+        -> IO ()
     ,ideNc :: IORef NameCache
     -- | A mapping of module name to known target (or candidate targets, if missing)
     ,knownTargetsVar :: Var (Hashed KnownTargets)
@@ -423,7 +427,7 @@ setValues state key file val diags =
 
 -- | Delete the value stored for a given ide build key
 deleteValue
-  :: (Typeable k, Hashable k, Eq k, Show k)
+  :: Shake.ShakeValue k
   => ShakeExtras
   -> k
   -> NormalizedFilePath
@@ -493,6 +497,7 @@ shakeOpen lspEnv defaultConfig logger debouncer
         positionMapping <- newVar HMap.empty
         knownTargetsVar <- newVar $ hashed HMap.empty
         let restartShakeSession = shakeRestart ideState
+
         let session = shakeSession
         mostRecentProgressEvent <- newTVarIO KickCompleted
         persistentKeys <- newVar HMap.empty
@@ -516,7 +521,7 @@ shakeOpen lspEnv defaultConfig logger debouncer
             opts { shakeExtra = addShakeExtra shakeExtras $ shakeExtra opts }
             rules
     shakeDb <- shakeDbM
-    initSession <- newSession shakeExtras shakeDb []
+    initSession <- newSession shakeExtras shakeDb (Just @[()] []) []
     shakeSession <- newMVar initSession
     shakeDatabaseProfile <- shakeDatabaseProfileIO shakeProfileDir
     let ideState = IdeState{..}
@@ -639,8 +644,8 @@ delayedAction a = do
 -- | Restart the current 'ShakeSession' with the given system actions.
 --   Any actions running in the current session will be aborted,
 --   but actions added via 'shakeEnqueue' will be requeued.
-shakeRestart :: IdeState -> [DelayedAction ()] -> IO ()
-shakeRestart IdeState{..} acts =
+shakeRestart :: IdeState -> Maybe [Key] -> [DelayedAction ()] -> IO ()
+shakeRestart IdeState{..} keysChanged acts =
     withMVar'
         shakeSession
         (\runner -> do
@@ -658,7 +663,7 @@ shakeRestart IdeState{..} acts =
         -- between spawning the new thread and updating shakeSession.
         -- See https://github.com/haskell/ghcide/issues/79
         (\() -> do
-          (,()) <$> newSession shakeExtras shakeDb acts)
+          (,()) <$> newSession shakeExtras shakeDb keysChanged acts)
 
 notifyTestingLogMessage :: ShakeExtras -> T.Text -> IO ()
 notifyTestingLogMessage extras msg = do
@@ -691,8 +696,8 @@ shakeEnqueue ShakeExtras{actionQueue, logger} act = do
 
 -- | Set up a new 'ShakeSession' with a set of initial actions
 --   Will crash if there is an existing 'ShakeSession' running.
-newSession :: ShakeExtras -> ShakeDatabase -> [DelayedActionInternal] -> IO ShakeSession
-newSession extras@ShakeExtras{..} shakeDb acts = do
+newSession :: Shake.ShakeValue key => ShakeExtras -> ShakeDatabase -> Maybe [key] -> [DelayedActionInternal] -> IO ShakeSession
+newSession extras@ShakeExtras{..} shakeDb keysChanged acts = do
     reenqueued <- atomically $ peekInProgress actionQueue
     let
         -- A daemon-like action used to inject additional work
@@ -715,7 +720,7 @@ newSession extras@ShakeExtras{..} shakeDb acts = do
 
         workRun restore = withSpan "Shake session" $ \otSpan -> do
           let acts' = pumpActionThread otSpan : map (run otSpan) (reenqueued ++ acts)
-          res <- try @SomeException (restore $ shakeRunDatabase shakeDb acts')
+          res <- try @SomeException (restore $ shakeRunDatabaseForKeys keysChanged shakeDb acts')
           let res' = case res of
                       Left e  -> "exception: " <> displayException e
                       Right _ -> "completed"
@@ -925,6 +930,16 @@ defineEarlyCutoff (Rule op) = addBuiltinRule noLint noIdentity $ \(Q (key, file)
     defineEarlyCutoff' True key file old mode $ op key file
 defineEarlyCutoff (RuleNoDiagnostics op) = addBuiltinRule noLint noIdentity $ \(Q (key, file)) (old :: Maybe BS.ByteString) mode -> otTracedAction key file isSuccess $ do
     defineEarlyCutoff' False key file old mode $ second (mempty,) <$> op key file
+
+defineNoFile :: IdeRule k v => (k -> Action v) -> Rules ()
+defineNoFile f = defineNoDiagnostics $ \k file -> do
+    if file == emptyFilePath then do res <- f k; return (Just res) else
+        fail $ "Rule " ++ show k ++ " should always be called with the empty string for a file"
+
+defineEarlyCutOffNoFile :: IdeRule k v => (k -> Action (BS.ByteString, v)) -> Rules ()
+defineEarlyCutOffNoFile f = defineEarlyCutoff $ RuleNoDiagnostics $ \k file -> do
+    if file == emptyFilePath then do (hash, res) <- f k; return (Just hash, Just res) else
+        fail $ "Rule " ++ show k ++ " should always be called with the empty string for a file"
 
 defineEarlyCutoff'
     :: IdeRule k v

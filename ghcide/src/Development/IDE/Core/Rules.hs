@@ -170,16 +170,6 @@ useNoFileE _ide k = fst <$> useE k emptyFilePath
 usesE :: IdeRule k v => k -> [NormalizedFilePath] -> MaybeT IdeAction [(v,PositionMapping)]
 usesE k = MaybeT . fmap sequence . mapM (useWithStaleFast k)
 
-defineNoFile :: IdeRule k v => (k -> Action v) -> Rules ()
-defineNoFile f = defineNoDiagnostics $ \k file -> do
-    if file == emptyFilePath then do res <- f k; return (Just res) else
-        fail $ "Rule " ++ show k ++ " should always be called with the empty string for a file"
-
-defineEarlyCutOffNoFile :: IdeRule k v => (k -> Action (BS.ByteString, v)) -> Rules ()
-defineEarlyCutOffNoFile f = defineEarlyCutoff $ RuleNoDiagnostics $ \k file -> do
-    if file == emptyFilePath then do (hash, res) <- f k; return (Just hash, Just res) else
-        fail $ "Rule " ++ show k ++ " should always be called with the empty string for a file"
-
 ------------------------------------------------------------
 -- Core IDE features
 ------------------------------------------------------------
